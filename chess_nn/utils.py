@@ -19,24 +19,30 @@ def count_parameters(model: torch.nn.Module) -> int:
     return total
 
 
-def save_checkpoint(model, optimizer, epoch: int, loss: float, filename: str = "checkpoint.pt"):
+def save_checkpoint(model, optimizer, epoch: int, loss: float,
+                    filename: str = "checkpoint.pt", scheduler=None):
     os.makedirs(CHECKPOINT_DIR, exist_ok=True)
     path = os.path.join(CHECKPOINT_DIR, filename)
-    torch.save({
+    data = {
         "epoch": epoch,
         "model_state": model.state_dict(),
         "optimizer_state": optimizer.state_dict(),
         "loss": loss,
-    }, path)
+    }
+    if scheduler is not None:
+        data["scheduler_state"] = scheduler.state_dict()
+    torch.save(data, path)
     print(f"Checkpoint saved: {path}")
     return path
 
 
-def load_checkpoint(path: str, model, optimizer=None):
+def load_checkpoint(path: str, model, optimizer=None, scheduler=None):
     checkpoint = torch.load(path, map_location=get_device(), weights_only=False)
     model.load_state_dict(checkpoint["model_state"])
     if optimizer is not None:
         optimizer.load_state_dict(checkpoint["optimizer_state"])
+    if scheduler is not None and "scheduler_state" in checkpoint:
+        scheduler.load_state_dict(checkpoint["scheduler_state"])
     print(f"Loaded checkpoint from epoch {checkpoint['epoch']} (loss={checkpoint['loss']:.4f})")
     return checkpoint["epoch"], checkpoint["loss"]
 

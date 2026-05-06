@@ -79,7 +79,7 @@ def cmd_status(_args):
         print("\nSelf-play data: none — run 'python run.py rl' to generate")
 
 
-def cmd_supervised(_args):
+def cmd_supervised(args):
     """Train on pre-processed Lichess PGN data."""
     from config import PROCESSED_DATA_DIR
 
@@ -92,7 +92,7 @@ def cmd_supervised(_args):
 
     print(f"Found {len(chunk_paths)} data chunk(s). Starting supervised training...\n")
     from chess_nn.train import train
-    train(chunk_paths)
+    train(chunk_paths, resume=args.resume)
 
 
 def cmd_rl(args):
@@ -101,6 +101,8 @@ def cmd_rl(args):
     run_rl_loop(
         num_iterations=args.iterations,
         start_checkpoint=args.checkpoint,
+        games_per_iter=args.games,
+        num_simulations=args.sims,
     )
 
 
@@ -154,7 +156,9 @@ def main():
     sub.add_parser("status", help="Show training progress and saved files")
 
     # supervised
-    sub.add_parser("supervised", help="Train on Lichess games (Phase 4)")
+    sup_p = sub.add_parser("supervised", help="Train on Lichess games (Phase 4)")
+    sup_p.add_argument("--resume", action="store_true",
+                       help="Resume from the latest epoch_XX.pt checkpoint")
 
     # rl
     rl_p = sub.add_parser("rl", help="Self-play RL loop (Phase 7)")
@@ -182,15 +186,8 @@ def main():
         parser.print_help()
         sys.exit(0)
 
-    # Apply CLI overrides to config before dispatch
-    if args.command == "rl":
-        import config
-        if args.games is not None:
-            config.RL_GAMES_PER_ITER = args.games
-        if args.sims is not None:
-            config.RL_SIMULATIONS = args.sims
-        if args.iterations is None:
-            args.iterations = 10
+    if args.command == "rl" and args.iterations is None:
+        args.iterations = 10
 
     dispatch = {
         "status":     cmd_status,

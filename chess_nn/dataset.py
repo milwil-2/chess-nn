@@ -18,7 +18,7 @@ import chess
 import chess.pgn
 from tqdm import tqdm
 import torch
-from torch.utils.data import Dataset, DataLoader, random_split
+from torch.utils.data import Dataset, DataLoader, Sampler, random_split
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import PROCESSED_DATA_DIR, TRAIN_SPLIT, VAL_SPLIT, BATCH_SIZE, POLICY_OUTPUT_SIZE
@@ -175,6 +175,45 @@ class ChessDataset(Dataset):
         )
 
 
+class ChunkBatchSampler(Sampler):
+    """
+    Yield batches where every index belongs to the same .npz chunk.
+
+    With shuffle=False (validation), items are ordered to be sequential within chunks.
+    With shuffle=True (training), both chunk order and within-chunk order are randomised
+    each epoch — giving good diversity without cache thrashing.
+    """
+
+    def __init__(self, subset, batch_size: int, shuffle: bool = True):
+        from collections import defaultdict
+        dataset = subset.dataset
+        chunk_groups: dict[int, list[int]] = defaultdict(list)
+        for gi in subset.indices:
+            ci = bisect.bisect_right(dataset.offsets, gi) - 1
+            chunk_groups[ci].append(gi)
+        self._groups = list(chunk_groups.values())
+        self._batch_size = batch_size
+        self._shuffle = shuffle
+
+    def __iter__(self):
+        import random
+        groups = [g[:] for g in self._groups]
+        if self._shuffle:
+            random.shuffle(groups)
+            groups = [random.sample(g, len(g)) for g in groups]
+        for group in groups:
+            for i in range(0, len(group), self._batch_size):
+                batch = group[i:i + self._batch_size]
+                if batch:
+                    yield batch
+
+    def __len__(self) -> int:
+        return sum(
+            (len(g) + self._batch_size - 1) // self._batch_size
+            for g in self._groups
+        )
+
+
 def make_dataloaders(chunk_paths: list[str]):
     """Split data into train/val/test DataLoaders."""
     dataset = ChessDataset(chunk_paths)
@@ -188,9 +227,12 @@ def make_dataloaders(chunk_paths: list[str]):
         generator=torch.Generator().manual_seed(42)
     )
 
-    train_loader = DataLoader(train_set, batch_size=BATCH_SIZE, shuffle=True, num_workers=1)
-    val_loader = DataLoader(val_set, batch_size=BATCH_SIZE, shuffle=False, num_workers=1)
-    test_loader = DataLoader(test_set, batch_size=BATCH_SIZE, shuffle=False, num_workers=1)
+    train_sampler = ChunkBatchSampler(train_set, BATCH_SIZE, shuffle=True)
+    val_sampler   = ChunkBatchSampler(val_set,   BATCH_SIZE, shuffle=False)
+    test_sampler  = ChunkBatchSampler(test_set,  BATCH_SIZE, shuffle=False)
+    train_loader = DataLoader(train_set, batch_sampler=train_sampler, num_workers=0)
+    val_loader   = DataLoader(val_set,   batch_sampler=val_sampler,   num_workers=0)
+    test_loader  = DataLoader(test_set,  batch_sampler=test_sampler,  num_workers=0)
 
     print(f"Train: {len(train_set):,} | Val: {len(val_set):,} | Test: {len(test_set):,}")
     return train_loader, val_loader, test_loader

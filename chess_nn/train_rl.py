@@ -179,10 +179,22 @@ def evaluate_models(new_model, old_model, num_games: int = RL_EVAL_GAMES,
     return win_rate
 
 
-def run_rl_loop(num_iterations: int = 10, start_checkpoint: str = "best_model.pt"):
+def run_rl_loop(num_iterations: int = 10, start_checkpoint: str = "best_model.pt",
+                games_per_iter: int = None, num_simulations: int = None,
+                eval_games: int = None, rl_epochs: int = None):
     """
     Main RL loop. Runs `num_iterations` cycles of self-play → train → evaluate.
+
+    Optional overrides (default to config.py values if not set):
+      games_per_iter    — self-play games per iteration
+      num_simulations   — MCTS simulations per move
+      eval_games        — head-to-head games for model comparison
+      rl_epochs         — training epochs per iteration
     """
+    games_per_iter  = games_per_iter  or RL_GAMES_PER_ITER
+    num_simulations = num_simulations or RL_SIMULATIONS
+    eval_games      = eval_games      or RL_EVAL_GAMES
+    rl_epochs       = rl_epochs       or RL_EPOCHS
     selfplay_dir = os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
         "data", "processed", "self_play"
@@ -209,8 +221,8 @@ def run_rl_loop(num_iterations: int = 10, start_checkpoint: str = "best_model.pt
         model.cpu()
         selfplay_path = generate_games(
             model,
-            num_games=RL_GAMES_PER_ITER,
-            num_simulations=RL_SIMULATIONS,
+            num_games=games_per_iter,
+            num_simulations=num_simulations,
             output_dir=selfplay_dir,
             iteration=iteration,
         )
@@ -222,7 +234,7 @@ def run_rl_loop(num_iterations: int = 10, start_checkpoint: str = "best_model.pt
 
         all_selfplay = sorted(glob.glob(os.path.join(selfplay_dir, "selfplay_iter*.npz")))
         dataset = SelfPlayDataset(all_selfplay)
-        train_on_selfplay(new_model, dataset)  # moves new_model to DEVICE internally
+        train_on_selfplay(new_model, dataset, epochs=rl_epochs)  # moves new_model to DEVICE internally
         del dataset
         new_model.cpu()
         new_model.eval()
@@ -234,7 +246,7 @@ def run_rl_loop(num_iterations: int = 10, start_checkpoint: str = "best_model.pt
         print("\n[3] Evaluating new model vs old...")
         old_model = copy.deepcopy(model)
         old_model.eval()
-        win_rate = evaluate_models(new_model, old_model)
+        win_rate = evaluate_models(new_model, old_model, num_games=eval_games)
         del old_model
         gc.collect()
 

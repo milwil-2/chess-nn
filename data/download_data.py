@@ -30,7 +30,31 @@ OUTPUT_FILE = os.path.join(RAW_DATA_DIR, "filtered_games.pgn")
 TARGET_GAMES = 20_000
 
 
+def _clear_old_data():
+    import shutil
+    from config import PROCESSED_DATA_DIR
+
+    cleared = []
+
+    # Raw PGN
+    if os.path.exists(OUTPUT_FILE):
+        os.remove(OUTPUT_FILE)
+        cleared.append(OUTPUT_FILE)
+
+    # Processed .npz chunks
+    if os.path.exists(PROCESSED_DATA_DIR):
+        shutil.rmtree(PROCESSED_DATA_DIR)
+        cleared.append(PROCESSED_DATA_DIR)
+
+    if cleared:
+        print("Cleared old data:")
+        for p in cleared:
+            print(f"  {p}")
+        print()
+
+
 def download_and_filter():
+    _clear_old_data()
     os.makedirs(RAW_DATA_DIR, exist_ok=True)
 
     print(f"Downloading from: {LICHESS_URL}")
@@ -42,7 +66,7 @@ def download_and_filter():
 
     # zstd streaming decompressor
     dctx = zstd.ZstdDecompressor()
-    stream_reader = dctx.stream_reader(response.raw)
+    stream_reader = dctx.stream_reader(response.raw)  # type: ignore[arg-type]
     text_stream = io.TextIOWrapper(stream_reader, encoding="utf-8", errors="replace")
 
     games_written = 0
