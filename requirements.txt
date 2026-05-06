@@ -1,0 +1,8 @@
+torch>=2.1.0
+python-chess>=1.999
+pygame>=2.5.0
+berserk>=0.13.0
+numpy>=1.24.0
+tqdm>=4.65.0
+requests>=2.31.0
+zstandard>=0.21.0

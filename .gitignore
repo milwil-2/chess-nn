@@ -1,0 +1,12 @@
+data/raw/
+data/processed/
+checkpoints/
+logs/
+__pycache__/
+*.pyc
+.env
+*.npz
+*.pt
+*.pth
+.DS_Store
+.venv/
