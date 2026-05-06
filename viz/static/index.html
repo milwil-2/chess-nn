@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Chess NN — Neural Network Visualizer</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0a0a12;
+    color: #ccd;
+    font-family: 'Courier New', monospace;
+    overflow: hidden;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+  header {
+    padding: 10px 20px;
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    border-bottom: 1px solid #1e1e2e;
+    flex-shrink: 0;
+  }
+  h1 { font-size: 15px; color: #7ecfa0; letter-spacing: 2px; text-transform: uppercase; }
+  #status { font-size: 12px; color: #556; }
+  #status.live { color: #7ecfa0; }
+  #value-display {
+    margin-left: auto;
+    font-size: 13px;
+    padding: 4px 12px;
+    border: 1px solid #2a2a3e;
+    border-radius: 4px;
+    background: #12121e;
+  }
+  canvas {
+    flex: 1;
+    display: block;
+    width: 100%;
+  }
+  footer {
+    padding: 6px 20px;
+    font-size: 11px;
+    color: #334;
+    border-top: 1px solid #1e1e2e;
+    flex-shrink: 0;
+  }
+  #legend {
+    display: flex;
+    gap: 16px;
+    align-items: center;
+    font-size: 11px;
+    color: #556;
+  }
+  .legend-dot {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    display: inline-block;
+    margin-right: 4px;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>⬡ Neural Network — Live Activations</h1>
+  <span id="status">Connecting...</span>
+  <div id="value-display">Value: —</div>
+</header>
+
+<canvas id="canvas"></canvas>
+
+<footer>
+  <div id="legend">
+    <span><span class="legend-dot" style="background:#1a1a3a"></span>Inactive neuron</span>
+    <span><span class="legend-dot" style="background:#0066ff"></span>Low activation</span>
+    <span><span class="legend-dot" style="background:#00ffaa"></span>Medium activation</span>
+    <span><span class="legend-dot" style="background:#ff4400"></span>High activation</span>
+    <span style="margin-left:16px; color:#334">Edge brightness = connection strength | Node size = activation magnitude | Pulse animates each forward pass</span>
+  </div>
+</footer>
+
+<script>
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const statusEl = document.getElementById('status');
+const valueEl = document.getElementById('value-display');
+
+// --- Layer definitions ---
+// Each layer has a name and expected node count
+const LAYER_DEFS = [
+  { key: 'input',  label: 'Input',    desc: '18 input planes\n(piece positions,\ncastling, turn)', color: '#3a7fd5' },
+  { key: 'conv',   label: 'Conv',     desc: '128 filters\ninitial feature\nextraction',          color: '#5a9fd5' },
+  { key: 'res1',   label: 'Res 1',   desc: 'Residual block 1\nlow-level patterns\n(edges, pieces)', color: '#6abf8f' },
+  { key: 'res2',   label: 'Res 2',   desc: 'Residual block 2\npiece relationships\nattacks',        color: '#7acf7f' },
+  { key: 'res3',   label: 'Res 3',   desc: 'Residual block 3\ntactical patterns\nthreats',          color: '#9fdf6f' },
+  { key: 'res4',   label: 'Res 4',   desc: 'Residual block 4\nstrategic concepts\nstructure',       color: '#cfcf5f' },
+  { key: 'res5',   label: 'Res 5',   desc: 'Residual block 5\nabstract position\nevaluation',       color: '#df9f3f' },
+  { key: 'policy', label: 'Policy',  desc: 'Top 10 candidate\nmoves ranked by\nprobability',       color: '#df5f3f' },
+  { key: 'value',  label: 'Value',   desc: 'Game outcome\n+1 = current player\nwins',              color: '#df3f7f' },
+];
+
+// Current activations from server
+let state = null;
+// Pulse animation: 0 = no pulse, 1.0 = full pulse just received
+let pulsePhase = 0;
+const PULSE_SPEED = 0.018;  // How fast the pulse travels right
+let pulseActive = false;
+let pulseLayerFront = -1;  // Which layer the pulse front is currently at
+
+// Tooltip state
+let hoveredLayer = -1;
+let hoveredNode = -1;
+let mouseX = 0, mouseY = 0;
+
+// Layout (computed on resize)
+let layout = null;
+
+function computeLayout() {
+  const W = canvas.width;
+  const H = canvas.height;
+  const padX = 60;
+  const padY = 60;
+  const usableW = W - padX * 2;
+  const usableH = H - padY * 2;
+  const nLayers = LAYER_DEFS.length;
+  const colWidth = usableW / nLayers;
+
+  const layers = LAYER_DEFS.map((def, li) => {
+    const x = padX + colWidth * li + colWidth / 2;
+    const nodeCount = getNodeCount(def.key);
+    const maxNodes = 18;
+    const nodeRadius = Math.min(10, (usableH * 0.7) / (maxNodes * 2.5));
+    const totalH = nodeCount * nodeRadius * 2.8;
+    const startY = padY + (usableH - totalH) / 2;
+
+    const nodes = Array.from({ length: nodeCount }, (_, ni) => ({
+      x,
+      y: startY + ni * nodeRadius * 2.8 + nodeRadius,
+      r: nodeRadius,
+    }));
+
+    return { ...def, x, nodes, colWidth };
+  });
+
+  return { layers, W, H, padX, padY };
+}
+
+function getNodeCount(key) {
+  if (!state) {
+    const defaults = { input: 18, conv: 16, res1: 16, res2: 16, res3: 16, res4: 16, res5: 16, policy: 10, value: 1 };
+    return defaults[key] || 16;
+  }
+  return (state[key] || []).length || 1;
+}
+
+function activationColor(val, alpha = 1.0) {
+  // 0 → deep blue, 0.5 → cyan/green, 1 → bright red/orange
+  val = Math.max(0, Math.min(1, val));
+  let r, g, b;
+  if (val < 0.25) {
+    const t = val / 0.25;
+    r = 10; g = Math.round(t * 100); b = Math.round(80 + t * 175);
+  } else if (val < 0.5) {
+    const t = (val - 0.25) / 0.25;
+    r = 0; g = Math.round(100 + t * 155); b = Math.round(255 * (1 - t));
+  } else if (val < 0.75) {
+    const t = (val - 0.5) / 0.25;
+    r = Math.round(t * 255); g = 255; b = 0;
+  } else {
+    const t = (val - 0.75) / 0.25;
+    r = 255; g = Math.round(255 * (1 - t * 0.7)); b = 0;
+  }
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
+function drawEdges(layer1, layer2, vals1, vals2, pulseAt) {
+  // Draw connections between two adjacent layers
+  // Only draw edges from top-8 active nodes in each layer to reduce clutter
+  const maxEdges = Math.min(layer1.nodes.length, 8);
+  const sorted1 = [...layer1.nodes.entries()].sort((a, b) => (vals1[b[0]] || 0) - (vals1[a[0]] || 0)).slice(0, maxEdges);
+
+  for (const [i, n1] of sorted1) {
+    const v1 = vals1[i] || 0;
+    if (v1 < 0.05) continue;
+
+    for (let j = 0; j < Math.min(layer2.nodes.length, 6); j++) {
+      const n2 = layer2.nodes[j];
+      const v2 = vals2[j] || 0;
+      const strength = (v1 + v2) / 2;
+
+      // Pulse glow along this edge
+      const pulseBrightness = pulseAt > 0.7 ? pulseAt * strength : 0;
+      const baseAlpha = strength * 0.15;
+      const alpha = baseAlpha + pulseBrightness * 0.6;
+
+      if (alpha < 0.02) continue;
+
+      const grad = ctx.createLinearGradient(n1.x, n1.y, n2.x, n2.y);
+      grad.addColorStop(0, activationColor(v1, alpha));
+      grad.addColorStop(1, activationColor(v2, alpha));
+
+      ctx.beginPath();
+      ctx.moveTo(n1.x, n1.y);
+      ctx.lineTo(n2.x, n2.y);
+      ctx.strokeStyle = grad;
+      ctx.lineWidth = strength * 1.5 + (pulseBrightness * 2);
+      ctx.stroke();
+    }
+  }
+}
+
+function drawNode(node, val, pulsed, isHovered) {
+  const r = node.r * (0.5 + val * 0.8);
+  const color = activationColor(val);
+  const glowColor = activationColor(val, 0.3);
+
+  // Glow (pulse amplifies it)
+  if (val > 0.1 || pulsed > 0) {
+    const glowR = r * (2.5 + pulsed * 3);
+    const grd = ctx.createRadialGradient(node.x, node.y, 0, node.x, node.y, glowR);
+    grd.addColorStop(0, activationColor(val, (0.15 + pulsed * 0.4) * val));
+    grd.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.beginPath();
+    ctx.arc(node.x, node.y, glowR, 0, Math.PI * 2);
+    ctx.fillStyle = grd;
+    ctx.fill();
+  }
+
+  // Node body
+  ctx.beginPath();
+  ctx.arc(node.x, node.y, r, 0, Math.PI * 2);
+  const bodyGrad = ctx.createRadialGradient(node.x - r * 0.3, node.y - r * 0.3, 0, node.x, node.y, r);
+  bodyGrad.addColorStop(0, activationColor(Math.min(1, val + 0.2)));
+  bodyGrad.addColorStop(1, color);
+  ctx.fillStyle = bodyGrad;
+  ctx.fill();
+
+  // Hover highlight
+  if (isHovered) {
+    ctx.beginPath();
+    ctx.arc(node.x, node.y, r + 3, 0, Math.PI * 2);
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  }
+
+  // Outline
+  ctx.beginPath();
+  ctx.arc(node.x, node.y, r, 0, Math.PI * 2);
+  ctx.strokeStyle = activationColor(val, 0.6);
+  ctx.lineWidth = 0.5;
+  ctx.stroke();
+}
+
+function drawLayerLabel(layer, vals) {
+  const avgVal = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
+  const topX = layer.nodes[0]?.x || layer.x;
+  const topY = Math.min(...layer.nodes.map(n => n.y)) - 20;
+
+  ctx.fillStyle = layer.color;
+  ctx.font = 'bold 12px Courier New';
+  ctx.textAlign = 'center';
+  ctx.fillText(layer.label, topX, topY);
+
+  ctx.fillStyle = '#445';
+  ctx.font = '10px Courier New';
+  ctx.fillText(`avg: ${avgVal.toFixed(2)}`, topX, topY + 13);
+}
+
+function drawTooltip(layer, nodeIdx, vals) {
+  if (hoveredLayer < 0 || !layout) return;
+  const layerDef = layout.layers[hoveredLayer];
+  if (!layerDef) return;
+
+  const val = (vals[nodeIdx] || 0).toFixed(4);
+  const lines = [
+    layerDef.label + (nodeIdx >= 0 ? ` — node ${nodeIdx}` : ''),
+    `Activation: ${val}`,
+    '',
+    ...layerDef.desc.split('\n'),
+  ];
+
+  const padding = 10;
+  const lineH = 16;
+  const tw = 200;
+  const th = lines.length * lineH + padding * 2;
+  let tx = mouseX + 14;
+  let ty = mouseY - th / 2;
+  if (tx + tw > canvas.width) tx = mouseX - tw - 14;
+  ty = Math.max(10, Math.min(canvas.height - th - 10, ty));
+
+  ctx.fillStyle = 'rgba(10,10,20,0.92)';
+  ctx.strokeStyle = layerDef.color;
+  ctx.lineWidth = 1;
+  roundRect(ctx, tx, ty, tw, th, 6);
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.textAlign = 'left';
+  lines.forEach((line, i) => {
+    ctx.fillStyle = i === 0 ? '#fff' : (line === '' ? '#333' : '#99a');
+    ctx.font = i === 0 ? 'bold 12px Courier New' : '11px Courier New';
+    ctx.fillText(line, tx + padding, ty + padding + i * lineH + 12);
+  });
+}
+
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+}
+
+function draw() {
+  if (!layout) layout = computeLayout();
+  const { layers, W, H } = layout;
+
+  ctx.clearRect(0, 0, W, H);
+
+  // Background grid (subtle)
+  ctx.strokeStyle = 'rgba(30,30,50,0.4)';
+  ctx.lineWidth = 0.5;
+  for (let x = 0; x < W; x += 60) {
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+  }
+  for (let y = 0; y < H; y += 60) {
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+  }
+
+  // Pulse animation: advance
+  if (pulseActive) {
+    pulseLayerFront += PULSE_SPEED * layers.length;
+    if (pulseLayerFront >= layers.length) {
+      pulseActive = false;
+      pulseLayerFront = -1;
+    }
+  }
+
+  // Draw edges first (behind nodes)
+  for (let li = 0; li < layers.length - 1; li++) {
+    const l1 = layers[li];
+    const l2 = layers[li + 1];
+    const v1 = state ? (state[l1.key] || []).map(x => Math.max(0, Math.min(1, x))) : l1.nodes.map(() => 0.1);
+    const v2 = state ? (state[l2.key] || []).map(x => Math.max(0, Math.min(1, x))) : l2.nodes.map(() => 0.1);
+    // Pulse at this edge = how close the pulse front is to this layer gap
+    const pulseDist = Math.abs(pulseLayerFront - (li + 0.5));
+    const pulseAt = pulseActive ? Math.max(0, 1 - pulseDist * 1.5) : 0;
+    drawEdges(l1, l2, v1, v2, pulseAt);
+  }
+
+  // Draw nodes and labels
+  let tooltipVals = null;
+  for (let li = 0; li < layers.length; li++) {
+    const layer = layers[li];
+    const vals = state ? (state[layer.key] || []).map(x => Math.max(0, Math.min(1, Math.abs(x)))) : layer.nodes.map(() => 0.08);
+
+    // Pulse brightness at this layer
+    const pulseDist = Math.abs(pulseLayerFront - li);
+    const pulseAt = pulseActive ? Math.max(0, 1 - pulseDist) : 0;
+
+    layer.nodes.forEach((node, ni) => {
+      const val = vals[ni] || 0;
+      const isHovered = hoveredLayer === li && hoveredNode === ni;
+      drawNode(node, val, pulseAt, isHovered);
+      if (isHovered) tooltipVals = vals;
+    });
+
+    drawLayerLabel(layer, vals);
+
+    // Policy move labels
+    if (layer.key === 'policy' && state && state.policy_labels) {
+      layer.nodes.forEach((node, ni) => {
+        const label = state.policy_labels[ni] || '';
+        ctx.fillStyle = 'rgba(180,180,200,0.7)';
+        ctx.font = '9px Courier New';
+        ctx.textAlign = 'left';
+        ctx.fillText(label, node.x + node.r + 3, node.y + 3);
+      });
+    }
+  }
+
+  // Tooltip on hover
+  if (hoveredLayer >= 0 && hoveredNode >= 0 && tooltipVals) {
+    drawTooltip(layers[hoveredLayer], hoveredNode, tooltipVals);
+  }
+
+  // Pulse counter overlay
+  if (pulseActive) {
+    ctx.fillStyle = 'rgba(126,207,160,0.7)';
+    ctx.font = 'bold 11px Courier New';
+    ctx.textAlign = 'right';
+    ctx.fillText('▶ FORWARD PASS', W - 20, 20);
+  }
+}
+
+// --- Animation loop ---
+function tick() {
+  draw();
+  requestAnimationFrame(tick);
+}
+
+// --- Resize handling ---
+function resize() {
+  canvas.width = canvas.offsetWidth;
+  canvas.height = canvas.offsetHeight;
+  layout = null;
+}
+window.addEventListener('resize', resize);
+resize();
+
+// --- Mouse interaction ---
+canvas.addEventListener('mousemove', e => {
+  const rect = canvas.getBoundingClientRect();
+  mouseX = e.clientX - rect.left;
+  mouseY = e.clientY - rect.top;
+
+  if (!layout) return;
+  hoveredLayer = -1;
+  hoveredNode = -1;
+
+  for (let li = 0; li < layout.layers.length; li++) {
+    const layer = layout.layers[li];
+    for (let ni = 0; ni < layer.nodes.length; ni++) {
+      const node = layer.nodes[ni];
+      const dx = mouseX - node.x;
+      const dy = mouseY - node.y;
+      if (Math.sqrt(dx * dx + dy * dy) < node.r + 6) {
+        hoveredLayer = li;
+        hoveredNode = ni;
+        return;
+      }
+    }
+  }
+});
+canvas.addEventListener('mouseleave', () => { hoveredLayer = -1; hoveredNode = -1; });
+
+// --- WebSocket ---
+function connect() {
+  const ws = new WebSocket(`ws://${location.host}/ws`);
+
+  ws.onopen = () => {
+    statusEl.textContent = '● Live';
+    statusEl.className = 'live';
+  };
+
+  ws.onmessage = e => {
+    const data = JSON.parse(e.data);
+    state = data;
+    layout = null;  // Recompute layout for new node counts
+
+    // Update value display
+    if (data.value && data.value.length > 0) {
+      const v = data.value[0];
+      const sign = v >= 0 ? '+' : '';
+      const who = Math.abs(v) < 0.1 ? 'Balanced' : (v > 0 ? 'White ▲' : 'Black ▲');
+      valueEl.textContent = `Value: ${sign}${v.toFixed(3)}  ${who}`;
+      valueEl.style.color = v > 0.1 ? '#adf' : (v < -0.1 ? '#faa' : '#ccd');
+    }
+
+    // Trigger pulse animation
+    pulseActive = true;
+    pulseLayerFront = 0;
+  };
+
+  ws.onclose = () => {
+    statusEl.textContent = '○ Disconnected — retrying...';
+    statusEl.className = '';
+    setTimeout(connect, 2000);
+  };
+
+  ws.onerror = () => ws.close();
+
+  // Keep alive
+  setInterval(() => {
+    if (ws.readyState === WebSocket.OPEN) ws.send('ping');
+  }, 20000);
+}
+
+connect();
+tick();
+</script>
+</body>
+</html>
