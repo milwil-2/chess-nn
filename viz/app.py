@@ -31,6 +31,7 @@ from chess_nn.board_encoding import board_to_tensor
 from chess_nn.move_encoding import policy_to_moves
 from chess_nn.utils import load_checkpoint
 from chess_nn.evaluate import select_move
+from chess_nn.mcts import MCTS
 
 from viz.board_renderer import BoardRenderer
 from viz.move_arrows import draw_move_arrows
@@ -102,9 +103,13 @@ def run_inference(model: ChessNet, board: chess.Board, heatmap_layer: int):
     return move_probs, float(all_acts["value"].squeeze()), heatmap
 
 
-def push_ai_move(model, board, heatmap_layer, last_move, temperature=0.5):
+def push_ai_move(model, board, heatmap_layer, last_move, temperature=0.5, use_mcts=True):
     """Let the AI make a move. Returns updated (last_move, move_probs, value, heatmap, game_over_msg)."""
-    ai_move = select_move(model, board, temperature=temperature)
+    if use_mcts:
+        mcts = MCTS(model, num_simulations=200)
+        ai_move = mcts.search(board, temperature=0)
+    else:
+        ai_move = select_move(model, board, temperature=temperature)
     if ai_move in board.legal_moves:
         board.push(ai_move)
         last_move = ai_move

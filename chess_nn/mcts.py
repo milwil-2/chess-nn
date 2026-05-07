@@ -102,12 +102,16 @@ class MCTS:
         self.model = model
         self.num_simulations = num_simulations
 
-    def search(self, board: chess.Board, temperature: float = 1.0) -> chess.Move:
+    def search(self, board: chess.Board, temperature: float = 1.0,
+               add_noise: bool = False) -> chess.Move:
         """
         Run `num_simulations` simulations from `board`, return the chosen move.
+        add_noise=True mixes Dirichlet noise into root priors (used during self-play).
         """
         root = Node(prior=1.0)
         self._expand(root, board)  # Expand root immediately so it has children
+        if add_noise:
+            self._add_dirichlet_noise(root)
 
         for _ in range(self.num_simulations):
             node = root
@@ -148,13 +152,17 @@ class MCTS:
         chosen = np.random.choice(len(moves), p=probs)
         return moves[chosen]
 
-    def get_policy(self, board: chess.Board, temperature: float = 1.0) -> dict[chess.Move, float]:
+    def get_policy(self, board: chess.Board, temperature: float = 1.0,
+                   add_noise: bool = True) -> dict[chess.Move, float]:
         """
         Run search and return the full visit distribution (used for training targets).
         This is the 'improved policy' that MCTS produces — better than the raw network output.
+        add_noise=True by default during self-play to prevent repetitive draws.
         """
         root = Node(prior=1.0)
         self._expand(root, board)
+        if add_noise:
+            self._add_dirichlet_noise(root)
 
         for _ in range(self.num_simulations):
             node = root
@@ -176,6 +184,17 @@ class MCTS:
                 visited_node.W += value if i % 2 == 0 else -value
 
         return root.visit_distribution(temperature=temperature)
+
+    def _add_dirichlet_noise(self, root: Node,
+                             alpha: float = 0.3, epsilon: float = 0.35) -> None:
+        """Mix Dirichlet noise into root priors — AlphaZero's exploration trick.
+        Without this, self-play games follow the same lines every time → repetition draws."""
+        children = list(root.children.values())
+        if not children:
+            return
+        noise = np.random.dirichlet([alpha] * len(children))
+        for child, n in zip(children, noise):
+            child.P = (1 - epsilon) * child.P + epsilon * n
 
     def _expand(self, node: Node, board: chess.Board) -> float:
         """

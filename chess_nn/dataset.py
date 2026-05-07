@@ -188,9 +188,9 @@ class ChunkBatchSampler(Sampler):
         from collections import defaultdict
         dataset = subset.dataset
         chunk_groups: dict[int, list[int]] = defaultdict(list)
-        for gi in subset.indices:
+        for local_idx, gi in enumerate(subset.indices):
             ci = bisect.bisect_right(dataset.offsets, gi) - 1
-            chunk_groups[ci].append(gi)
+            chunk_groups[ci].append(local_idx)
         self._groups = list(chunk_groups.values())
         self._batch_size = batch_size
         self._shuffle = shuffle

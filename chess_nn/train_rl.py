@@ -93,27 +93,25 @@ def train_on_selfplay(model, dataset: SelfPlayDataset, epochs: int = RL_EPOCHS, 
     loader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=0)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=WEIGHT_DECAY)
 
+    import time
     model.to(DEVICE)
     model.train()
     final_loss = 0.0
+    total_batches = len(loader)
+    print_every = max(1, total_batches // 5)
 
     for epoch in range(epochs):
         epoch_loss = 0.0
-        for boards, policy_targets, value_targets in loader:
+        t0 = time.time()
+        for batch_idx, (boards, policy_targets, value_targets) in enumerate(loader):
             boards = boards.to(DEVICE)
             policy_targets = policy_targets.to(DEVICE)
             value_targets = value_targets.to(DEVICE)
             policy_logits, value_pred = model(boards)
 
-            # Policy loss: KL divergence between MCTS distribution and network output
-            # log_softmax gives log-probabilities from the network
-            # MCTS distribution is already probabilities (sums to 1)
             log_probs = F.log_softmax(policy_logits, dim=1)
             policy_loss = -(policy_targets * log_probs).sum(dim=1).mean()
-
-            # Value loss: MSE between predicted win probability and actual outcome
             value_loss = F.mse_loss(value_pred.squeeze(1), value_targets)
-
             loss = policy_loss + VALUE_LOSS_WEIGHT * value_loss
 
             optimizer.zero_grad()
@@ -123,8 +121,20 @@ def train_on_selfplay(model, dataset: SelfPlayDataset, epochs: int = RL_EPOCHS, 
 
             epoch_loss += loss.item()
 
-        avg = epoch_loss / len(loader)
-        print(f"  RL epoch {epoch+1}/{epochs}: loss={avg:.4f}")
+            if (batch_idx + 1) % print_every == 0 or batch_idx == total_batches - 1:
+                avg_so_far = epoch_loss / (batch_idx + 1)
+                pct = (batch_idx + 1) / total_batches * 100
+                print(
+                    f"    epoch {epoch+1}/{epochs}  batch {batch_idx+1}/{total_batches}"
+                    f"  [{pct:4.0f}%]  loss {avg_so_far:.4f}"
+                    f"  (policy {policy_loss.item():.4f}  value {value_loss.item():.4f})",
+                    flush=True,
+                )
+
+        avg = epoch_loss / total_batches
+        elapsed = time.time() - t0
+        e_m, e_s = divmod(int(elapsed), 60)
+        print(f"  → epoch {epoch+1}/{epochs} done  avg loss {avg:.4f}  {e_m}m {e_s:02d}s")
         final_loss = avg
 
     return final_loss
@@ -147,6 +157,7 @@ def evaluate_models(new_model, old_model, num_games: int = RL_EVAL_GAMES,
     for game_idx in range(num_games):
         board = chess.Board()
         new_is_white = (game_idx % 2 == 0)
+        side = "new=White" if new_is_white else "new=Black"
 
         while not board.is_game_over():
             if (board.turn == chess.WHITE) == new_is_white:
@@ -172,16 +183,22 @@ def evaluate_models(new_model, old_model, num_games: int = RL_EVAL_GAMES,
         else:
             draws += 1
 
+        print(
+            f"  eval game {game_idx+1:>2}/{num_games}  {side}  result {result:<7}"
+            f"  running: new {new_wins} / draws {draws} / old {old_wins}",
+            flush=True,
+        )
+
     del new_mcts, old_mcts
 
     win_rate = new_wins / num_games
-    print(f"  Evaluation: new={new_wins} draws={draws} old={old_wins}  win_rate={win_rate:.2f}")
+    print(f"  → win rate {win_rate:.0%}  (new={new_wins} draws={draws} old={old_wins})")
     return win_rate
 
 
 def run_rl_loop(num_iterations: int = 10, start_checkpoint: str = "best_model.pt",
                 games_per_iter: int = None, num_simulations: int = None,
-                eval_games: int = None, rl_epochs: int = None):
+                eval_games: int = None, rl_epochs: int = None, resume: bool = False):
     """
     Main RL loop. Runs `num_iterations` cycles of self-play → train → evaluate.
 
@@ -190,6 +207,7 @@ def run_rl_loop(num_iterations: int = 10, start_checkpoint: str = "best_model.pt
       num_simulations   — MCTS simulations per move
       eval_games        — head-to-head games for model comparison
       rl_epochs         — training epochs per iteration
+      resume            — if True, skip iterations already completed
     """
     games_per_iter  = games_per_iter  or RL_GAMES_PER_ITER
     num_simulations = num_simulations or RL_SIMULATIONS
@@ -201,6 +219,26 @@ def run_rl_loop(num_iterations: int = 10, start_checkpoint: str = "best_model.pt
     )
     os.makedirs(selfplay_dir, exist_ok=True)
 
+    # Detect which iteration to resume from
+    start_iteration = 0
+    if resume:
+        done = sorted(glob.glob(os.path.join(selfplay_dir, "selfplay_iter*.npz")))
+        if done:
+            last_iter = int(os.path.basename(done[-1]).replace("selfplay_iter", "").replace(".npz", ""))
+            start_iteration = last_iter + 1
+            print(f"Resuming from iteration {start_iteration} (found {len(done)} completed iterations)")
+            # Prefer the latest rl checkpoint over the supervised one
+            rl_ckpts = sorted(glob.glob(os.path.join(CHECKPOINT_DIR, "rl_iter_*.pt")))
+            if rl_ckpts:
+                start_checkpoint = os.path.basename(rl_ckpts[-1])
+                print(f"Loading latest RL checkpoint: {start_checkpoint}")
+        else:
+            print("No completed iterations found — starting from scratch")
+
+    if start_iteration >= num_iterations:
+        print(f"Already completed {num_iterations} iterations. Done.")
+        return
+
     # Load current best model
     model = ChessNet()
     checkpoint_path = os.path.join(CHECKPOINT_DIR, start_checkpoint)
@@ -211,14 +249,14 @@ def run_rl_loop(num_iterations: int = 10, start_checkpoint: str = "best_model.pt
         print("No checkpoint found — starting from scratch (random weights)")
     model.eval()
 
-    for iteration in range(num_iterations):
+    for iteration in range(start_iteration, num_iterations):
         print(f"\n{'='*50}")
         print(f"ITERATION {iteration + 1} / {num_iterations}")
         print(f"{'='*50}")
 
-        # Step 1: Generate self-play data — keep model on CPU so MCTS tensor ops stay cheap
+        # Step 1: Generate self-play data on DEVICE (MPS/CUDA faster than CPU for batch=1)
         print("\n[1] Generating self-play games...")
-        model.cpu()
+        model.to(DEVICE)
         selfplay_path = generate_games(
             model,
             num_games=games_per_iter,
@@ -242,9 +280,10 @@ def run_rl_loop(num_iterations: int = 10, start_checkpoint: str = "best_model.pt
         if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
             torch.mps.empty_cache()
 
-        # Step 3: Evaluate new model vs old (both on CPU for MCTS)
+        # Step 3: Evaluate new model vs old
         print("\n[3] Evaluating new model vs old...")
-        old_model = copy.deepcopy(model)
+        new_model.to(DEVICE)
+        old_model = copy.deepcopy(model).to(DEVICE)
         old_model.eval()
         win_rate = evaluate_models(new_model, old_model, num_games=eval_games)
         del old_model
