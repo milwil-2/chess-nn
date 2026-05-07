@@ -103,6 +103,7 @@ def cmd_rl(args):
         start_checkpoint=args.checkpoint,
         games_per_iter=args.games,
         num_simulations=args.sims,
+        resume=args.resume,
     )
 
 
@@ -170,6 +171,8 @@ def main():
                       help="Override RL_SIMULATIONS from config.py")
     rl_p.add_argument("--checkpoint", default="best_model.pt",
                       help="Starting checkpoint filename (default: best_model.pt)")
+    rl_p.add_argument("--resume", action="store_true",
+                      help="Resume from the last completed RL iteration")
 
     # selfplay
     sp_p = sub.add_parser("selfplay", help="Generate self-play data (no training)")

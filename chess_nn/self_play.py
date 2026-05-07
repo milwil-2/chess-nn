@@ -32,7 +32,11 @@ from chess_nn.mcts import MCTS
 # Early in the game (< TEMP_THRESHOLD moves), use temperature=1 for variety.
 # Late in the game, use near-deterministic play (temperature→0).
 # This mirrors AlphaZero: explore early, exploit late.
-TEMP_THRESHOLD = 30
+TEMP_THRESHOLD = 50
+
+
+RESIGN_THRESHOLD = 0.95   # Value head confidence to trigger resignation
+RESIGN_MOVES     = 5      # Consecutive moves above threshold before resigning
 
 
 def play_game(mcts: MCTS, max_moves: int = 200) -> list[dict]:
@@ -43,8 +47,11 @@ def play_game(mcts: MCTS, max_moves: int = 200) -> list[dict]:
     Each record has board_tensor, policy (4672-length array), and turn (chess.WHITE/BLACK).
     The value target is filled in at the end once we know the game result.
     """
+    import torch
     board = chess.Board()
     positions = []
+    resign_counter = 0
+    resignation_result = None
 
     for move_num in range(max_moves):
         if board.is_game_over():
@@ -52,8 +59,26 @@ def play_game(mcts: MCTS, max_moves: int = 200) -> list[dict]:
 
         temperature = 1.0 if move_num < TEMP_THRESHOLD else 0.1
 
-        # Get MCTS visit distribution — this is the improved policy target
+        print(f"    move {move_num+1:>3}...", end="\r", flush=True)
         visit_dist = mcts.get_policy(board, temperature=temperature)
+
+        # Check resignation: query value head directly for current position
+        device = next(mcts.model.parameters()).device
+        tensor = torch.from_numpy(board_to_tensor(board)).unsqueeze(0).float().to(device)
+        with torch.no_grad():
+            _, value = mcts.model(tensor)
+        v = value.item()
+        if abs(v) >= RESIGN_THRESHOLD:
+            resign_counter += 1
+            if resign_counter >= RESIGN_MOVES:
+                # Current player is losing (value near -1) → they resign
+                if v < 0:
+                    resignation_result = "0-1" if board.turn == chess.WHITE else "1-0"
+                else:
+                    resignation_result = "1-0" if board.turn == chess.WHITE else "0-1"
+                break
+        else:
+            resign_counter = 0
 
         # Convert visit distribution to a 4672-length array
         policy_target = np.zeros(4672, dtype=np.float32)
@@ -75,10 +100,16 @@ def play_game(mcts: MCTS, max_moves: int = 200) -> list[dict]:
         chosen_move = np.random.choice(moves, p=probs)
         board.push(chosen_move)
 
-    # --- Fill in value targets ---
-    # Now we know who won. Go back through every position and assign
-    # the game result from that player's perspective.
-    result = board.result()
+    # Determine result — resignation overrides board result
+    if resignation_result:
+        result = resignation_result
+        draw_reason = None
+    else:
+        result = board.result()
+        outcome = board.outcome()
+        draw_reason = outcome.termination.name if outcome and result == "1/2-1/2" else None
+
+    # Fill in value targets
     records = []
     for pos in positions:
         if result == "1-0":
@@ -86,7 +117,7 @@ def play_game(mcts: MCTS, max_moves: int = 200) -> list[dict]:
         elif result == "0-1":
             value = -1.0 if pos["turn"] == chess.WHITE else 1.0
         else:
-            value = 0.0  # Draw
+            value = 0.0
 
         records.append({
             "board_tensor": pos["board_tensor"],
@@ -94,7 +125,7 @@ def play_game(mcts: MCTS, max_moves: int = 200) -> list[dict]:
             "value": np.float32(value),
         })
 
-    return records, result
+    return records, result, draw_reason
 
 
 def generate_games(model, num_games: int, num_simulations: int = 200,
@@ -109,6 +140,7 @@ def generate_games(model, num_games: int, num_simulations: int = 200,
 
     Returns the path to the final merged .npz file.
     """
+    import time
     if output_dir is None:
         output_dir = os.path.join(PROCESSED_DATA_DIR, "self_play")
     os.makedirs(output_dir, exist_ok=True)
@@ -117,21 +149,42 @@ def generate_games(model, num_games: int, num_simulations: int = 200,
     results = {"1-0": 0, "0-1": 0, "1/2-1/2": 0, "*": 0}
     total_positions = 0
 
-    print(f"Generating {num_games} self-play games ({num_simulations} sims/move, "
-          f"flushing every {chunk_size})...")
+    print(f"Generating {num_games} self-play games ({num_simulations} sims/move)...")
 
     chunk_paths = []
     all_boards, all_policies, all_values = [], [], []
+    game_times = []
 
-    for game_idx in tqdm(range(num_games), desc="Self-play games"):
-        records, result = play_game(mcts)
+    draw_reasons: dict[str, int] = {}
+
+    for game_idx in range(num_games):
+        t0 = time.time()
+        records, result, draw_reason = play_game(mcts)
+        elapsed = time.time() - t0
+        game_times.append(elapsed)
+
         results[result] = results.get(result, 0) + 1
+        if draw_reason:
+            draw_reasons[draw_reason] = draw_reasons.get(draw_reason, 0) + 1
+        moves = len(records)
 
         for r in records:
             all_boards.append(r["board_tensor"])
             all_policies.append(r["policy"])
             all_values.append(r["value"])
             total_positions += 1
+
+        avg_t = sum(game_times) / len(game_times)
+        remaining = (num_games - game_idx - 1) * avg_t
+        eta_m, eta_s = divmod(int(remaining), 60)
+        w, d, b = results["1-0"], results["1/2-1/2"], results["0-1"]
+        reason_str = f" [{draw_reason}]" if draw_reason else ""
+        print(
+            f"  game {game_idx+1:>3}/{num_games}  {moves:>3} moves  {result:<7}{reason_str:<22}"
+            f"  W/D/B: {w}/{d}/{b}"
+            f"  {elapsed:.1f}s/game  ETA {eta_m}m {eta_s:02d}s",
+            flush=True,
+        )
 
         # Flush to disk every chunk_size games to keep RAM bounded
         is_last = (game_idx == num_games - 1)
@@ -167,8 +220,12 @@ def generate_games(model, num_games: int, num_simulations: int = 200,
             os.remove(p)
 
     total = num_games
-    print(f"\nResults — White: {results['1-0']}/{total}  "
+    print(f"\nDone — White: {results['1-0']}/{total}  "
           f"Black: {results['0-1']}/{total}  "
-          f"Draws: {results['1/2-1/2']}/{total}")
-    print(f"Positions: {total_positions:,} → {final_path}")
+          f"Draws: {results['1/2-1/2']}/{total}  "
+          f"Positions: {total_positions:,}")
+    if draw_reasons:
+        for reason, count in sorted(draw_reasons.items(), key=lambda x: -x[1]):
+            print(f"  Draw reason: {reason} × {count}")
+    print(f"Saved → {final_path}")
     return final_path
