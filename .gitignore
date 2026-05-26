@@ -1,9 +1,29 @@
-data/raw/
-data/processed/
-checkpoints/
-logs/
+# Training artifacts — ignored in template/ and all models/*/
+**/data/raw/
+**/data/processed/
+**/checkpoints/
+**/logs/
+
+# Inference-only helper data (large, user-downloaded or auto-generated;
+# never committed). See PROJECT_SUMMARY.md → Opt-in inference helpers.
+# Syzygy 3-4-5 tablebases (~1 GB)
+**/data/syzygy/
+# Polyglot opening book (~10 MB)
+**/data/book.bin
+# Cross-game MCTS transposition cache (grows)
+**/data/mcts_cache.json
+**/data/mcts_cache.json.tmp
+# Syzygy table files (belt-and-suspenders in case syzygy/ moves)
+*.rtbw
+*.rtbz
+
+# Python
 __pycache__/
+**/__pycache__/
 *.pyc
+*.pyo
+
+# Misc
 .env
 *.npz
 *.pt
