@@ -1,0 +1,95 @@
+# lichess-bot config for chess-nn v3_vast.
+#
+# Copy this file to ~/lichess-bot/config.yml and replace TOKEN_HERE with your
+# personal API token (https://lichess.org/account/oauth/token; scopes:
+# bot:play challenge:read challenge:write).
+#
+# Reference: https://github.com/lichess-bot-devs/lichess-bot/blob/master/config.yml.default
+
+token: "TOKEN_HERE"
+url: "https://lichess.org/"
+
+engine:
+  dir: "/Users/milan/Desktop/projects/chess-nn/models/v3_vast"
+  name: "run.py"
+  protocol: "uci"
+  ponder: false
+
+  # Pass our `engine` subcommand + checkpoint as engine args.
+  # lichess-bot will invoke: <interpreter> <dir>/<name> <args...>
+  # Note: lichess-bot doesn't expose an "interpreter" key directly; if the
+  # default `./run.py` invocation fails (no shebang), use a wrapper script:
+  #   #!/usr/bin/env bash
+  #   exec /opt/homebrew/bin/python3.12 "$(dirname "$0")/run.py" "$@"
+  # and point `name:` at that wrapper.
+  engine_options:
+    SyzygyPath: "/Users/milan/Desktop/projects/chess-nn/models/v3_vast/data/syzygy"
+    OpeningBookPath: "/Users/milan/Desktop/projects/chess-nn/models/v3_vast/data/book.bin"
+    Hash: 256
+
+  uci_options:
+    Hash: 256
+
+  # lichess-bot recognizes `engine_args` for command-line flags.
+  engine_args:
+    - "engine"
+    - "--checkpoint"
+    - "/Users/milan/Desktop/projects/chess-nn/models/v3_vast/checkpoints/best_model.pt"
+    - "--sims"
+    - "400"
+
+  go_commands:
+    # Use time controls from the actual game rather than fixed depth/nodes.
+    # Empty values let lichess-bot pass wtime/btime/winc/binc to the engine.
+    nodes: ""
+    depth: ""
+    movetime: ""
+
+  draw_or_resign:
+    resign_enabled: true
+    resign_score: -900     # centipawn-equivalent; engine reports WDL though
+    resign_moves: 5
+    offer_draw_enabled: false
+
+challenge:
+  concurrency: 1            # one game at a time (single-threaded MCTS)
+  sort_by: "best"
+  accept_bot: true
+  only_bot: false
+  max_increment: 10         # accept up to 10s/move increment
+  min_increment: 3
+  max_base: 900             # 15 minutes
+  min_base: 300             # 5 minutes
+  variants:
+    - "standard"
+  time_controls:
+    - "rapid"
+    - "blitz"
+  modes:
+    - "rated"
+  min_opponent_rating: 1500
+  max_opponent_rating: 2500
+  recent_bot_challenge_age: 60
+  max_recent_bot_challenges: 2
+
+abort_time: 20            # abort a game if opponent hasn't moved in this many seconds
+fake_think_time: false
+move_overhead: 1000
+quit_after_all_games_finish: false
+rate_limiting_delay: 0
+correspondence_move_time: 60
+
+matchmaking:
+  # Set to true once the bot has accumulated 30+ rated games and you want to
+  # actively seek opponents instead of waiting for challenges.
+  allow_matchmaking: false
+  challenge_variant: "random"
+  challenge_timeout: 30
+  challenge_initial_time:
+    - 600
+  challenge_increment:
+    - 5
+  challenge_mode: "rated"
+  opponent_min_rating: 1500
+  opponent_max_rating: 2500
+  opponent_rating_diff: 300
