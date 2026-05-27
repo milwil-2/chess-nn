@@ -51,9 +51,22 @@ DIRICHLET_SHAPE_FLOOR = 0.1
 # At the MCTS root, divide policy logits by this T before softmax. Higher T
 # = flatter priors = MCTS willing to search more children. Reduces the
 # "38% out-of-top-8 picks" symptom by giving the search a less peaked
-# distribution to work from. 1.0 disables. KataGo uses 1.25 → 1.1; constant
-# 1.25 is the right starting point for chess (~30 legal moves midgame).
-ROOT_POLICY_TEMPERATURE = 1.25
+# distribution to work from. 1.0 disables. KataGo uses 1.25 → 1.1; the
+# I8 sweep (#26) over T in {1.10, 1.25, 1.50, 2.00} at SF1600+SF1800
+# showed T=1.50 wins by ~730 Elo over T=1.25 (which lost every game).
+# Sweep override: set CHESSNN_ROOT_POLICY_TEMPERATURE=<float> in env to
+# override at import time without editing this file.
+ROOT_POLICY_TEMPERATURE = float(os.environ.get("CHESSNN_ROOT_POLICY_TEMPERATURE", 1.50))
+
+# I2: ply-aware annealing of the root softmax T from start → end across
+# the first `_ANNEAL_PLY` plies (KataGo decays T by ~0.15 across opening→
+# endgame). Code path is shipped but disabled by default because the
+# A/B match (annealed 1.50→1.35 vs constant 1.50, 20 games at SF1600+1800)
+# showed annealed lost by ~104 Elo. Set END != START to re-enable.
+ROOT_POLICY_TEMPERATURE_END = float(os.environ.get(
+    "CHESSNN_ROOT_POLICY_TEMPERATURE_END", ROOT_POLICY_TEMPERATURE))
+ROOT_POLICY_TEMPERATURE_ANNEAL_PLY = int(os.environ.get(
+    "CHESSNN_ROOT_POLICY_TEMPERATURE_ANNEAL_PLY", 40))
 
 # --- Reinforcement Learning ---
 RL_GAMES_PER_ITER  = 25     # Self-play games generated each iteration

@@ -186,16 +186,40 @@ class MCTS:
             return
         self.tcache.record(board, {m: c.N for m, c in root.children.items()})
 
-    def _retemperature_root(self, root: Node) -> None:
-        """Re-apply ROOT_POLICY_TEMPERATURE to an already-expanded root's child
-        priors. Used when subtree reuse hands us a root whose priors were
-        computed deeper in the tree (without root smoothing). Inverts to
-        logits, divides by T, re-softmaxes, so we don't double-smooth."""
+    def _root_temperature(self, board: chess.Board) -> float:
+        """Compute the ply-aware root softmax temperature (I8 + I2).
+
+        Linearly interpolates between ROOT_POLICY_TEMPERATURE (opening)
+        and ROOT_POLICY_TEMPERATURE_END (after ROOT_POLICY_TEMPERATURE_ANNEAL_PLY
+        plies). Returns 1.0 (no-op) if config import fails."""
         try:
             from config import ROOT_POLICY_TEMPERATURE  # type: ignore
-            T = ROOT_POLICY_TEMPERATURE
+            T_start = ROOT_POLICY_TEMPERATURE
         except Exception:
-            return
+            return 1.0
+        try:
+            from config import ROOT_POLICY_TEMPERATURE_END  # type: ignore
+            T_end = ROOT_POLICY_TEMPERATURE_END
+        except Exception:
+            T_end = T_start
+        try:
+            from config import ROOT_POLICY_TEMPERATURE_ANNEAL_PLY  # type: ignore
+            anneal_ply = ROOT_POLICY_TEMPERATURE_ANNEAL_PLY
+        except Exception:
+            anneal_ply = 40
+        if anneal_ply <= 0 or T_start == T_end:
+            return T_start
+        # fullmove_number is 1-indexed; ply ≈ 2*(fullmove-1) + (1 if Black to move else 0)
+        ply = 2 * (board.fullmove_number - 1) + (0 if board.turn else 1)
+        alpha = min(1.0, ply / float(anneal_ply))
+        return T_start + (T_end - T_start) * alpha
+
+    def _retemperature_root(self, root: Node, board: chess.Board) -> None:
+        """Re-apply the ply-aware root temperature to an already-expanded root's
+        child priors. Used when subtree reuse hands us a root whose priors were
+        computed deeper in the tree (without root smoothing). Inverts to
+        logits, divides by T, re-softmaxes, so we don't double-smooth."""
+        T = self._root_temperature(board)
         if T == 1.0 or not root.children:
             return
         children = list(root.children.values())
@@ -288,7 +312,7 @@ class MCTS:
             root = Node(prior=1.0)
             self._expand(root, board_history, is_root=True)
         else:
-            self._retemperature_root(root)
+            self._retemperature_root(root, board)
         if fresh_root:
             self._seed_priors_from_cache(board, root)
         if enable_blunder_filter:
@@ -366,7 +390,7 @@ class MCTS:
             root = Node(prior=1.0)
             self._expand(root, board_history, is_root=True)
         else:
-            self._retemperature_root(root)
+            self._retemperature_root(root, board)
         if fresh_root:
             self._seed_priors_from_cache(board, root)
         if enable_blunder_filter:
@@ -542,11 +566,7 @@ class MCTS:
         legal_logits = np.array([policy[i] for i in legal_indices])
         legal_logits -= legal_logits.max()  # Numerical stability
         if is_root:
-            try:
-                from config import ROOT_POLICY_TEMPERATURE  # type: ignore
-                T = ROOT_POLICY_TEMPERATURE
-            except Exception:
-                T = 1.0
+            T = self._root_temperature(board)
             if T != 1.0:
                 legal_logits = legal_logits / T
         priors = np.exp(legal_logits)
