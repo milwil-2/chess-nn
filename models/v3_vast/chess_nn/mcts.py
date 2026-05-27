@@ -598,9 +598,22 @@ class MCTS:
                         for c in kept.values():
                             c.P = c.P / s
                         node.children = kept
+                # Syzygy's value_scalar is already CP-POV (it negates internally
+                # for the losing side), so no white-POV flip needed here.
                 return tb_value
 
-        return wdl_to_scalar(value.cpu())  # WDL logits → scalar ∈ [-1, 1]
+        v_scalar = wdl_to_scalar(value.cpu())  # WDL logits → scalar ∈ [-1, 1]
+        # P2 pilot (GH #6): when the network is trained on W-POV value labels,
+        # the value head outputs white-POV. MCTS backup assumes CP-POV (it
+        # alternates the sign every ply). Flip back to CP-POV here so the
+        # tree-walk logic is unchanged.
+        try:
+            from config import WHITE_POV_VALUE as _WPOV  # type: ignore
+        except ImportError:
+            _WPOV = False
+        if _WPOV and board.turn == chess.BLACK:
+            v_scalar = -v_scalar
+        return v_scalar
 
     def _terminal_value(self, result: str, turn: bool) -> float:
         """Convert PGN result string to a value from the current player's view."""

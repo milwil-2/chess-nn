@@ -6,9 +6,19 @@ Usage:
 
 Defaults to checkpoints/best_model.pt (relative to this script's directory).
 
-The model's value head returns WDL logits from the CURRENT-PLAYER's POV.
-We convert to a scalar via wdl_to_scalar, then flip the sign when it is
-black to move so that the comparison is consistently in WHITE POV.
+The model's value head returns WDL logits whose POV depends on how the
+network was trained:
+  * config.WHITE_POV_VALUE == False (default, legacy): logits are CURRENT
+    player's POV. We convert via wdl_to_scalar then flip the sign on
+    black-to-move so the probe comparison stays in white POV.
+  * config.WHITE_POV_VALUE == True (P2 pilot, GH #6): logits are already
+    in white POV — skip the flip.
+
+To eval a pilot checkpoint that was trained with the W-POV labels, set
+``CHESSNN_WHITE_POV_VALUE=1`` in the env before invoking this script:
+
+    CHESSNN_WHITE_POV_VALUE=1 python eval_value_probe.py \
+        checkpoints/pilot_whitepov_e1.pt
 """
 
 import os
@@ -22,9 +32,18 @@ sys.path.insert(0, THIS_DIR)
 import chess
 import torch
 
+import config
 from chess_nn.model import ChessNet, wdl_to_scalar
 from chess_nn.board_encoding import boards_to_tensor
 from chess_nn.utils import load_checkpoint
+
+
+def _white_pov_active() -> bool:
+    """Resolve the white-POV flag from env (override) or config (default)."""
+    env = os.environ.get("CHESSNN_WHITE_POV_VALUE")
+    if env is not None:
+        return env not in ("", "0", "false", "False", "no", "off")
+    return bool(getattr(config, "WHITE_POV_VALUE", False))
 
 
 def main():
@@ -39,6 +58,9 @@ def main():
     load_checkpoint(checkpoint, model)
     model.eval()
 
+    white_pov_net = _white_pov_active()
+    print(f"Network value POV: {'WHITE (no flip)' if white_pov_net else 'CURRENT-PLAYER (flip on black-to-move)'}")
+
     per_cat: dict = {}
     rows = []
     for p in probes:
@@ -46,10 +68,13 @@ def main():
         tensor = torch.from_numpy(boards_to_tensor([board])).unsqueeze(0).float()
         with torch.no_grad():
             _, value_logits = model(tensor)
-        # wdl_to_scalar returns current-player-POV in [-1, +1]
-        pred_stm_pov = float(wdl_to_scalar(value_logits))
-        # Convert to white POV
-        pred_white_pov = pred_stm_pov if board.turn == chess.WHITE else -pred_stm_pov
+        pred_raw = float(wdl_to_scalar(value_logits))
+        if white_pov_net:
+            # Network output is already in white POV.
+            pred_white_pov = pred_raw
+        else:
+            # Network output is current-player POV → flip on black-to-move.
+            pred_white_pov = pred_raw if board.turn == chess.WHITE else -pred_raw
         err = abs(pred_white_pov - p["true_white_pov"])
         per_cat.setdefault(p["label"], []).append(err)
         rows.append((p["label"], p["fen"], p["true_white_pov"], pred_white_pov, err))

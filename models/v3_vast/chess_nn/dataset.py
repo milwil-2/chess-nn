@@ -23,16 +23,36 @@ from torch.utils.data import Dataset, DataLoader, Sampler, random_split
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import PROCESSED_DATA_DIR, TRAIN_SPLIT, VAL_SPLIT, BATCH_SIZE, POLICY_OUTPUT_SIZE, DATA_WORKERS
+try:
+    from config import WHITE_POV_VALUE as _CONFIG_WHITE_POV_VALUE  # type: ignore
+except ImportError:
+    _CONFIG_WHITE_POV_VALUE = False
 from chess_nn.board_encoding import boards_to_tensor
 from chess_nn.move_encoding import move_to_index, get_legal_move_indices
 
 CHUNK_SIZE = 20_000
 
 
-def result_to_class(result: str, turn: bool) -> int:
-    """Convert PGN result to WDL class from current player's perspective.
-    0 = win, 1 = draw, 2 = loss.
+def result_to_class(result: str, turn: bool, white_pov: bool | None = None) -> int:
+    """Convert PGN result to WDL class.
+
+    By default returns the class from the CURRENT PLAYER's perspective:
+      0 = win-for-mover, 1 = draw, 2 = loss-for-mover.
+
+    When white_pov is True (or config.WHITE_POV_VALUE is True and the caller
+    leaves white_pov=None), returns the class from WHITE's perspective:
+      1-0 → 0 always, 0-1 → 2 always, draw → 1. This is the P2 pilot
+    relabeling that removes side-to-move dependence from the value target.
     """
+    if white_pov is None:
+        white_pov = _CONFIG_WHITE_POV_VALUE
+    if white_pov:
+        if result == "1-0":
+            return 0
+        elif result == "0-1":
+            return 2
+        else:
+            return 1
     if result == "1-0":
         return 0 if turn == chess.WHITE else 2
     elif result == "0-1":

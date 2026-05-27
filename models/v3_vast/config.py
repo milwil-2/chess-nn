@@ -60,6 +60,18 @@ TRAIN_SPLIT = 0.90
 VAL_SPLIT = 0.05
 TEST_SPLIT = 0.05
 
+# --- Value-head label convention (P2 pilot, GH #6) ---
+# Default False = current-player POV (legacy: 0=win-for-mover, 2=loss-for-mover).
+# When True, value labels are stored from White's POV (0=white-wins, 2=white-loses)
+# regardless of side to move. The hypothesis is that white-POV labels remove the
+# side-to-move pessimism we measured on the value-probe set. Wired into:
+#   * data/download_data.py `_wdl()` (PGN encode time)
+#   * chess_nn/dataset.py `result_to_class()` (PGN encode time)
+#   * chess_nn/mcts.py `_expand()` (inference; flip back to CP-POV for backup)
+#   * eval_value_probe.py (skip the stm→white-POV flip on output)
+# Keep at False until Phase 4b R1 ships the proper retraining.
+WHITE_POV_VALUE = False
+
 # --- Stockfish supervision ---
 SF_LOSS_WEIGHT      = 0.3   # weight of auxiliary Stockfish policy loss
 SF_ANNOTATE_FRACTION = 0.20  # fraction of positions annotated per chunk
