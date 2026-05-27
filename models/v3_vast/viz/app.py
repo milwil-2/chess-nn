@@ -399,8 +399,12 @@ def main():
     from config import OPENING_BOOK_PATH, SYZYGY_PATH, MCTS_CACHE_PATH
     book = OpeningBook(polyglot_path=OPENING_BOOK_PATH)
     tablebase = SyzygyTable(path=SYZYGY_PATH)
-    tcache = TranspositionCache(path=MCTS_CACHE_PATH)
-    print(f"[viz] book={book.loaded_source}  syzygy={'ON' if tablebase.is_available else 'OFF'}  tcache={len(tcache)} positions")
+    # Tag the tcache by the WHITE checkpoint's filename so visit counts
+    # written by different model versions stay segmented (issue #27). Tag
+    # is capped at 16 chars to keep the on-disk JSON compact.
+    tcache_tag = os.path.basename(white_name)[:16]
+    tcache = TranspositionCache(path=MCTS_CACHE_PATH, tag=tcache_tag)
+    print(f"[viz] book={book.loaded_source}  syzygy={'ON' if tablebase.is_available else 'OFF'}  tcache={len(tcache)} positions  tag={tcache_tag!r}")
 
     white_mcts = MCTS(white_model, num_simulations=200,
                       book=book, tablebase=tablebase, tcache=tcache)

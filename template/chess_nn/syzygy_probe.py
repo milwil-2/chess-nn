@@ -170,6 +170,22 @@ class SyzygyTable:
         best_wdl = max(wdls.values())
         wdl_preserving = [m for m, s in wdls.items() if s == best_wdl]
         if best_wdl >= 1:
+            # B1: when winning, DTZ tie-breaking can pick a move that
+            # accidentally stalemates the opponent (converting a win to a
+            # draw). Drop those moves before DTZ selection. If filtering
+            # would empty the set, fall back to the unfiltered list and warn
+            # — better to risk the stalemate than to play an illegal move.
+            non_stalemating = []
+            for m in wdl_preserving:
+                scratch = board.copy(stack=False)
+                scratch.push(m)
+                if not scratch.is_stalemate():
+                    non_stalemating.append(m)
+            if non_stalemating:
+                wdl_preserving = non_stalemating
+            else:
+                print("[syzygy] every WDL-preserving move stalemates; keeping originals",
+                      file=sys.stderr)
             # Winning side — minimize |DTZ| to force progress.
             # |dtz| can be 0 for moves that immediately reach 50-move boundary;
             # those moves are typically pawn pushes or captures, which we want.

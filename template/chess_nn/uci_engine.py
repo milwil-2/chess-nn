@@ -7,10 +7,11 @@ SimpleEngine (and any other UCI-conforming GUI / harness).
 Wire-up: `run.py engine` calls `run(model, sims, fast)` here instead of the
 old stub protocol.
 
-Known limitation: `stop` is a no-op — the underlying MCTS loop is synchronous
-and single-threaded, so we can't preempt it. Current search finishes; bestmove
-is emitted on its own schedule. Time controls are still honored via
-`MCTS.search_time_budget(...)`.
+I13: `stop` is now a cooperative cancel — sets `mcts._stop_requested`, which
+the MCTS simulation loop checks once per sim (~5 ms grain). For this to work
+mid-search the caller must deliver `stop` on a separate thread (the synchronous
+stdin loop here can't read while a search is in flight). Time controls are
+still honored via `MCTS.search_time_budget(...)`.
 """
 
 import sys
@@ -273,9 +274,13 @@ def run(model, default_sims: int = 200, fast: bool = False) -> None:
             _emit(f"bestmove {move.uci()}")
 
         elif cmd == "stop":
-            # No-op: MCTS is synchronous; the in-flight search (if any) has
-            # already completed by the time we see this line. The next `go`
-            # will produce a new bestmove. Documented limitation.
+            # I13: cooperative cancellation. MCTS still runs inline on the UCI
+            # thread, so this only takes effect if `stop` arrives via another
+            # thread (e.g. a GUI's I/O reader) while search is in flight. The
+            # MCTS loop checks self._stop_requested once per simulation
+            # (~5 ms grain on CPU), then returns the current best move.
+            if mcts is not None:
+                mcts.stop()
             continue
 
         elif cmd == "quit":

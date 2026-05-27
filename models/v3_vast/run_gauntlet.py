@@ -15,11 +15,17 @@ Outputs
 -------
 - PGN of all games: logs/gauntlet_<timestamp>.pgn
 - CSV history row : logs/elo_history.csv
-  columns: timestamp, checkpoint_hash, games, tc, elo, ci_low, ci_high,
-           decisive_rate, mean_plies
+  columns: timestamp, checkpoint_hash, level, games, tc, elo, ci_low, ci_high,
+           decisive_rate, mean_plies, note
+
+  - One row per Stockfish level is appended AS EACH LEVEL COMPLETES so a
+    SIGTERM mid-run does not lose data (B3, issue #25).
+  - An additional row with level='AGGREGATE' is appended after all levels
+    finish; if the run was aborted, the aggregate row carries note='partial'.
 """
 
 import argparse
+import atexit
 import csv
 import datetime
 import hashlib
@@ -28,6 +34,7 @@ import math
 import os
 import random
 import shutil
+import signal
 import sys
 import time
 from typing import Optional
@@ -109,26 +116,37 @@ def random_book_opening(book_path: str, plies: int = 8) -> chess.Board:
 
 
 def play_one_game(our_engine, sf_engine, start_board: chess.Board,
-                  base_s: float, inc_s: float, our_color: chess.Color,
+                  our_base_s: float, our_inc_s: float,
+                  opp_base_s: float, opp_inc_s: float,
+                  our_color: chess.Color,
                   movetime_cap_s: float = 10.0) -> tuple[str, list[chess.Move], int]:
     """Play one full game. Returns (result, move_list, num_plies).
+
+    Each side gets its own (base, inc) time control:
+      - our side  : our_base_s + our_inc_s
+      - opponent  : opp_base_s + opp_inc_s
 
     result is one of "1-0", "0-1", "1/2-1/2" (PGN convention).
     """
     board = start_board.copy()
     moves: list[chess.Move] = []
-    w_time, b_time = base_s, base_s
+    # Per-side clocks: white_time, black_time and matching increments.
+    if our_color == chess.WHITE:
+        w_time, b_time = our_base_s, opp_base_s
+        w_inc, b_inc = our_inc_s, opp_inc_s
+    else:
+        w_time, b_time = opp_base_s, our_base_s
+        w_inc, b_inc = opp_inc_s, our_inc_s
 
     while not board.is_game_over(claim_draw=True) and len(moves) < 400:
         side = board.turn
         engine = our_engine if side == our_color else sf_engine
-        # Send the per-move time budget. Use the wtime/btime/winc/binc form so
-        # the engine can self-manage; also enforce a hard cap on movetime.
+        # Send both sides' clocks/increments so each engine sees its own TC.
         limit = chess.engine.Limit(
             white_clock=max(0.05, w_time),
             black_clock=max(0.05, b_time),
-            white_inc=inc_s,
-            black_inc=inc_s,
+            white_inc=w_inc,
+            black_inc=b_inc,
         )
         t0 = time.monotonic()
         try:
@@ -144,11 +162,11 @@ def play_one_game(our_engine, sf_engine, start_board: chess.Board,
             # Illegal/missing move = loss for that side
             return ("0-1" if side == our_color else "1-0"), moves, len(moves)
 
-        # Update clocks
+        # Update clocks using each side's own increment
         if side == chess.WHITE:
-            w_time = max(0.0, w_time - elapsed) + inc_s
+            w_time = max(0.0, w_time - elapsed) + w_inc
         else:
-            b_time = max(0.0, b_time - elapsed) + inc_s
+            b_time = max(0.0, b_time - elapsed) + b_inc
 
         # Time forfeit
         if (side == chess.WHITE and w_time <= 0) or (side == chess.BLACK and b_time <= 0):
@@ -234,27 +252,66 @@ def aggregate_elo(per_level: list[dict]) -> tuple[float, float, float]:
     return mean, mean - 1.96 * sigma_total, mean + 1.96 * sigma_total
 
 
-def append_history(elo: float, lo: float, hi: float, games: int, tc: str,
-                   ckpt_hash: str, decisive_rate: float, mean_plies: float) -> None:
+CSV_COLUMNS = [
+    "timestamp", "checkpoint_hash", "level", "games", "tc",
+    "elo", "ci_low", "ci_high",
+    "decisive_rate", "mean_plies", "note",
+]
+
+
+def _ensure_csv_header() -> None:
+    """Create the CSV with the current schema if missing. If a legacy file
+    exists with a different header, append a single new-schema header line
+    ONCE so subsequent rows are unambiguous; readers should key off the
+    header line immediately preceding the row of interest.
+
+    (Simpler than a destructive migration; old rows remain readable and new
+    rows use the new schema.)
+    """
     os.makedirs(LOGS_DIR, exist_ok=True)
-    new_file = not os.path.exists(ELO_HISTORY_CSV)
+    if not os.path.exists(ELO_HISTORY_CSV):
+        with open(ELO_HISTORY_CSV, "w", newline="") as f:
+            csv.writer(f).writerow(CSV_COLUMNS)
+        return
+    # Check whether the current-schema header is already present anywhere in
+    # the file. If it is, we don't need another one. If not, append one.
+    header_line = ",".join(CSV_COLUMNS)
+    with open(ELO_HISTORY_CSV, "r", newline="") as f:
+        for line in f:
+            if line.strip() == header_line:
+                return  # current schema header already present
     with open(ELO_HISTORY_CSV, "a", newline="") as f:
-        w = csv.writer(f)
-        if new_file:
-            w.writerow(["timestamp", "checkpoint_hash", "games", "tc",
-                        "elo", "ci_low", "ci_high",
-                        "decisive_rate", "mean_plies"])
-        w.writerow([
+        csv.writer(f).writerow(CSV_COLUMNS)
+
+
+def append_history_row(*, level: str, elo: float, lo: float, hi: float,
+                       games: int, tc: str, ckpt_hash: str,
+                       decisive_rate: float, mean_plies: float,
+                       note: str = "") -> None:
+    """Append a single row to the elo history CSV. `level` is either the
+    Stockfish UCI_Elo as a string (e.g. '1400') or 'AGGREGATE'."""
+    _ensure_csv_header()
+
+    def _fmt(x: float) -> str:
+        if x != x or x in (float("inf"), float("-inf")):  # NaN/Inf
+            return ""
+        return f"{x:.1f}"
+
+    with open(ELO_HISTORY_CSV, "a", newline="") as f:
+        csv.writer(f).writerow([
             datetime.datetime.now().isoformat(timespec="seconds"),
             ckpt_hash,
+            level,
             games,
             tc,
-            f"{elo:.1f}",
-            f"{lo:.1f}",
-            f"{hi:.1f}",
+            _fmt(elo),
+            _fmt(lo),
+            _fmt(hi),
             f"{decisive_rate:.3f}",
             f"{mean_plies:.1f}",
+            note,
         ])
+        f.flush()
 
 
 def main() -> int:
@@ -262,7 +319,17 @@ def main() -> int:
     parser.add_argument("--checkpoint", default=DEFAULT_CHECKPOINT)
     parser.add_argument("--book", default=DEFAULT_BOOK)
     parser.add_argument("--tc", default="10+0.1",
-                        help="Time control 'base+inc' in seconds (default 10+0.1)")
+                        help="Time control 'base+inc' in seconds applied to "
+                             "BOTH sides unless --our-tc/--opponent-tc are "
+                             "set (default 10+0.1)")
+    parser.add_argument("--our-tc", default=None,
+                        help="Per-side TC for chess-nn (default: --tc)")
+    parser.add_argument("--opponent-tc", default=None,
+                        help="Per-side TC for the opponent (Stockfish). "
+                             "Default: --tc, except when SF is in "
+                             "UCI_LimitStrength=true mode (always true here), "
+                             "in which case the opponent default becomes "
+                             "'2+0.05' to remove wall-clock as a confound.")
     parser.add_argument("--games-per-level", type=int, default=30)
     parser.add_argument("--sims", type=int, default=200,
                         help="Default MCTS sims for engine (overridden by time controls)")
@@ -272,7 +339,28 @@ def main() -> int:
     args = parser.parse_args()
 
     random.seed(args.seed)
+
+    # Resolve per-side TCs.
     base_s, inc_s = parse_tc(args.tc)
+    our_tc = args.our_tc if args.our_tc is not None else args.tc
+    our_base_s, our_inc_s = parse_tc(our_tc)
+
+    # Opponent default depends on whether the user set it explicitly.
+    # We always boot SF with UCI_LimitStrength=true (see boot_stockfish), so
+    # when --opponent-tc is omitted we tighten to 2+0.05 so wall-clock isn't
+    # a free win for SF (which has cheap moves at any low UCI_Elo).
+    if args.opponent_tc is not None:
+        opp_tc = args.opponent_tc
+    elif args.our_tc is not None:
+        # User customised our side but left opponent unset — opponent inherits
+        # the conditional default since SF is still limit-strength.
+        opp_tc = "2+0.05"
+    else:
+        # Pure default: no per-side flags given. Preserve old behaviour
+        # (both sides use --tc) so existing scripts/CI don't break.
+        opp_tc = args.tc
+    opp_base_s, opp_inc_s = parse_tc(opp_tc)
+
     sf_path = find_stockfish()
     ckpt_hash = checkpoint_hash(args.checkpoint)
 
@@ -283,16 +371,68 @@ def main() -> int:
     print(f"=== Gauntlet ===")
     print(f"Checkpoint     : {args.checkpoint} ({ckpt_hash})")
     print(f"Stockfish      : {sf_path}")
-    print(f"TC             : {args.tc} ({base_s}s + {inc_s}s/move)")
+    print(f"TC (our)       : {our_tc} ({our_base_s}s + {our_inc_s}s/move)")
+    print(f"TC (opponent)  : {opp_tc} ({opp_base_s}s + {opp_inc_s}s/move)")
     print(f"Games/level    : {args.games_per_level}")
     print(f"SF levels      : {args.levels}")
     print(f"PGN output     : {pgn_path}")
     print()
 
-    per_level_summary = []
-    total_decisive = 0
-    total_plies = 0
-    total_games = 0
+    # State shared with the abort handler. Mutated as the run progresses so
+    # the atexit / signal hook can write a meaningful partial aggregate row
+    # even if we're killed mid-level.
+    state = {
+        "per_level_summary": [],   # completed (sf_elo, w/d/l) rows
+        "total_decisive": 0,
+        "total_plies": 0,
+        "total_games": 0,
+        "aggregate_written": False,
+        "tc_label": f"{our_tc}/{opp_tc}",
+    }
+
+    def _write_aggregate(note: str = "") -> None:
+        if state["aggregate_written"]:
+            return
+        per = state["per_level_summary"]
+        tg = state["total_games"]
+        if tg == 0 and not per:
+            # Nothing useful to write — skip rather than emit empty rows.
+            state["aggregate_written"] = True
+            return
+        final_elo, final_lo, final_hi = aggregate_elo(per)
+        decisive_rate = state["total_decisive"] / max(1, tg)
+        mean_plies = state["total_plies"] / max(1, tg)
+        try:
+            append_history_row(
+                level="AGGREGATE",
+                elo=final_elo, lo=final_lo, hi=final_hi,
+                games=tg, tc=state["tc_label"], ckpt_hash=ckpt_hash,
+                decisive_rate=decisive_rate, mean_plies=mean_plies,
+                note=note,
+            )
+        except Exception as exc:
+            print(f"[abort handler] failed to write aggregate row: {exc}",
+                  file=sys.stderr)
+        state["aggregate_written"] = True
+
+    def _atexit_handler() -> None:
+        # Called on normal exit, uncaught exceptions, and SIGTERM (via the
+        # handler below that re-raises SystemExit). If the run finished
+        # cleanly we already wrote the aggregate, so this is a no-op.
+        if not state["aggregate_written"]:
+            _write_aggregate(note="partial")
+
+    def _signal_handler(signum, frame):
+        # SIGTERM/SIGINT: trigger the atexit chain.
+        print(f"\n[gauntlet] received signal {signum}, flushing partial state…",
+              file=sys.stderr)
+        # Calling sys.exit raises SystemExit which lets the try/finally
+        # blocks unwind cleanly (engine.quit etc.) and runs atexit handlers.
+        sys.exit(128 + signum)
+
+    atexit.register(_atexit_handler)
+    signal.signal(signal.SIGTERM, _signal_handler)
+    signal.signal(signal.SIGINT, _signal_handler)
 
     our_engine = boot_our_engine(args.checkpoint, args.sims)
     try:
@@ -318,7 +458,9 @@ def main() -> int:
                             pass
 
                         result, moves, n_plies = play_one_game(
-                            our_engine, sf_engine, start, base_s, inc_s,
+                            our_engine, sf_engine, start,
+                            our_base_s, our_inc_s,
+                            opp_base_s, opp_inc_s,
                             our_color,
                         )
                         # Score from our POV
@@ -336,9 +478,9 @@ def main() -> int:
                             draws += 1
                         plies_sum += n_plies
                         if result != "1/2-1/2":
-                            total_decisive += 1
-                        total_plies += n_plies
-                        total_games += 1
+                            state["total_decisive"] += 1
+                        state["total_plies"] += n_plies
+                        state["total_games"] += 1
 
                         # Write PGN — build a full board from scratch including
                         # book-opening plies + game plies so chess.pgn can
@@ -362,7 +504,9 @@ def main() -> int:
                         game.headers["Black"] = ("Chess-NN" if our_color == chess.BLACK
                                                  else f"Stockfish_{sf_elo}")
                         game.headers["Result"] = result
-                        game.headers["TimeControl"] = args.tc
+                        game.headers["TimeControl"] = (
+                            f"{our_tc}/{opp_tc}" if our_tc != opp_tc else our_tc
+                        )
 
                         cur = game
                         for m in moves:
@@ -376,7 +520,10 @@ def main() -> int:
                               f"{n_plies}p)  cumulative score={score_now:.2f} "
                               f"(W/D/L={wins}/{draws}/{losses})")
                 finally:
-                    sf_engine.quit()
+                    try:
+                        sf_engine.quit()
+                    except Exception:
+                        pass
 
                 level_time = time.monotonic() - t_level
                 n = wins + draws + losses
@@ -388,16 +535,35 @@ def main() -> int:
                       f"({sf_elo + lo:.0f}..{sf_elo + hi:.0f})  "
                       f"[{level_time:.1f}s]")
                 print()
-                per_level_summary.append({
+                state["per_level_summary"].append({
                     "sf_elo": sf_elo, "wins": wins, "draws": draws,
                     "losses": losses, "n": n,
                 })
+
+                # B3: append a per-level row IMMEDIATELY so a kill after this
+                # point doesn't lose the data we just collected.
+                level_plies_mean = plies_sum / max(1, n)
+                # decisive_rate within this level only
+                level_decisive = (wins + losses) / max(1, n)
+                append_history_row(
+                    level=str(sf_elo),
+                    elo=est_elo, lo=sf_elo + lo, hi=sf_elo + hi,
+                    games=n, tc=state["tc_label"], ckpt_hash=ckpt_hash,
+                    decisive_rate=level_decisive, mean_plies=level_plies_mean,
+                    note="",
+                )
     finally:
         try:
             our_engine.quit()
         except Exception:
             pass
 
+    # All levels completed — write the aggregate row (atexit handler will be
+    # a no-op once we set aggregate_written=True).
+    per_level_summary = state["per_level_summary"]
+    total_games = state["total_games"]
+    total_decisive = state["total_decisive"]
+    total_plies = state["total_plies"]
     final_elo, final_lo, final_hi = aggregate_elo(per_level_summary)
     decisive_rate = total_decisive / max(1, total_games)
     mean_plies = total_plies / max(1, total_games)
@@ -413,9 +579,16 @@ def main() -> int:
         print(f"  SF={r['sf_elo']:>4}: {r['wins']:>3}W {r['draws']:>3}D {r['losses']:>3}L "
               f"score={score:.3f}")
 
-    append_history(final_elo, final_lo, final_hi, total_games, args.tc,
-                   ckpt_hash, decisive_rate, mean_plies)
-    print(f"\nAppended row to {ELO_HISTORY_CSV}")
+    note = "" if len(per_level_summary) == len(args.levels) else "partial"
+    append_history_row(
+        level="AGGREGATE",
+        elo=final_elo, lo=final_lo, hi=final_hi,
+        games=total_games, tc=state["tc_label"], ckpt_hash=ckpt_hash,
+        decisive_rate=decisive_rate, mean_plies=mean_plies,
+        note=note,
+    )
+    state["aggregate_written"] = True
+    print(f"\nAppended rows to {ELO_HISTORY_CSV}")
     print(f"PGN saved to     {pgn_path}")
 
     return 0

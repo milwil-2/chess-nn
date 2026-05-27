@@ -89,6 +89,12 @@ class Node:
         # Apply temperature
         powered = {m: v ** (1.0 / temperature) for m, v in visits.items()}
         total = sum(powered.values())
+        if total <= 0:
+            # I13: search may have been stopped before any sims completed, so
+            # every child has N=0. Return a uniform distribution rather than
+            # dividing by zero — the caller (search()) will pick a move.
+            n = len(powered)
+            return {m: 1.0 / n for m in powered}
         return {m: v / total for m, v in powered.items()}
 
 
@@ -117,11 +123,27 @@ class MCTS:
         # Subtree of the position after our last chosen move. Used to carry over
         # search work across consecutive search() calls — see _try_reuse_root().
         self._next_root: "Node | None" = None
+        # I13: cooperative cancellation flag for UCI `stop`. Checked once per
+        # simulation; set via stop() from another thread (or before search()).
+        # Reset at the end of every search so subsequent calls start clean.
+        self._stop_requested: bool = False
 
     def reset(self) -> None:
         """Drop any carried-over search tree. Call on game reset or arbitrary
         position jumps where the carried subtree no longer matches the board."""
         self._next_root = None
+
+    def stop(self) -> None:
+        """I13: request the currently-running search to abort at the next
+        simulation boundary. Safe to call from another thread — assignment to
+        a Python bool is atomic. The flag is cleared automatically when the
+        search returns, so the next search() / search_time_budget() call is
+        not pre-cancelled."""
+        self._stop_requested = True
+
+    def _check_stop(self) -> bool:
+        """Test hook for I13. Returns True if a stop has been requested."""
+        return self._stop_requested
 
     def _book_move(self, board: chess.Board) -> "chess.Move | None":
         """Consult opening book. Returns the book move (and resets subtree
@@ -275,6 +297,9 @@ class MCTS:
             self._add_dirichlet_noise(root)
 
         for _ in range(self.num_simulations):
+            # I13: cooperative stop check between simulations.
+            if self._stop_requested:
+                break
             node = root
             # stack=False: skip copying move history — MCTS never undoes moves, saves ~80× _BoardState allocs per sim
             scratch_board = board.copy(stack=False)
@@ -303,6 +328,11 @@ class MCTS:
         self._record_to_cache(board, root)
 
         dist = root.visit_distribution(temperature=temperature)
+        # I13: clear the stop flag so the next search() starts unaborted.
+        self._stop_requested = False
+        if not dist:
+            legal = list(board.legal_moves)
+            return legal[0] if legal else chess.Move.null()
         moves = list(dist.keys())
         probs = [dist[m] for m in moves]
         chosen = np.random.choice(len(moves), p=probs)
@@ -370,11 +400,16 @@ class MCTS:
                 visited_node.W += value if i % 2 == 0 else -value
 
             sims_done += 1
+            # I13: cooperative stop check between simulations.
+            if self._stop_requested:
+                break
             if (time.monotonic() - start) >= deadline_s:
                 break
 
         self._record_to_cache(board, root)
 
+        # I13: clear the stop flag so the next search starts unaborted.
+        self._stop_requested = False
         dist = root.visit_distribution(temperature=temperature)
         if not dist:
             # Degenerate: no legal children. Return any legal move if possible.
@@ -416,6 +451,9 @@ class MCTS:
             self._add_dirichlet_noise(root)
 
         for _ in range(self.num_simulations):
+            # I13: cooperative stop check between simulations.
+            if self._stop_requested:
+                break
             node = root
             scratch_board = board.copy(stack=False)
             scratch_history = list(board_history)
@@ -437,6 +475,8 @@ class MCTS:
                 visited_node.W += value if i % 2 == 0 else -value
 
         self._record_to_cache(board, root)
+        # I13: clear the stop flag so the next search starts unaborted.
+        self._stop_requested = False
         return root.visit_distribution(temperature=temperature)
 
     def _add_dirichlet_noise(self, root: Node,
