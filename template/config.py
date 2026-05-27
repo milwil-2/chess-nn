@@ -55,20 +55,6 @@ DIRICHLET_SHAPE_FLOOR = 0.1
 # 1.25 is the right starting point for chess (~30 legal moves midgame).
 ROOT_POLICY_TEMPERATURE = 1.25
 
-# --- Inference-only MCTS helpers (engine + viz; NEVER wired into self-play) ---
-# Opening book: optional polyglot .bin file. Falls back to a hardcoded
-# mini-book if the file is absent.
-OPENING_BOOK_PATH = os.path.join(PROJECT_DIR, "data", "book.bin")
-
-# Syzygy tablebases (3-4-5 piece, ~1 GB). Download from
-# http://tablebase.sesse.net/syzygy/3-4-5/ and point this at the directory
-# containing the .rtbw / .rtbz files. Empty/missing path → probe disabled.
-SYZYGY_PATH = os.path.join(PROJECT_DIR, "data", "syzygy")
-
-# Transposition cache: cross-game persisted visit counts at MCTS roots.
-# Auto-loaded on engine/viz startup; saved on clean exit.
-MCTS_CACHE_PATH = os.path.join(PROJECT_DIR, "data", "mcts_cache.json")
-
 # --- Reinforcement Learning ---
 RL_GAMES_PER_ITER  = 25     # Self-play games generated each iteration
 RL_SIMULATIONS     = 200    # MCTS simulations per move (more = stronger but slower)
@@ -86,3 +72,20 @@ RAW_DATA_DIR = os.path.join(DATA_DIR, "raw")
 PROCESSED_DATA_DIR = os.path.join(DATA_DIR, "processed")
 CHECKPOINT_DIR = os.path.join(PROJECT_DIR, "checkpoints")
 LOG_DIR = os.path.join(PROJECT_DIR, "logs")
+
+# --- Inference-only MCTS helpers (engine + viz; NEVER wired into self-play) ---
+# Defined after PROJECT_DIR since they depend on it. Each path lives under
+# the variant's data/ subdir; helpers gracefully no-op when the file/dir is
+# absent so these constants are safe to ship without the data being present.
+# Opening book: optional polyglot .bin file. Falls back to a hardcoded
+# mini-book if the file is absent.
+OPENING_BOOK_PATH = os.path.join(PROJECT_DIR, "data", "book.bin")
+
+# Syzygy tablebases (3-4-5 piece, ~1 GB). Download from
+# http://tablebase.sesse.net/syzygy/3-4-5/ and point this at the directory
+# containing the .rtbw / .rtbz files. Empty/missing path → probe disabled.
+SYZYGY_PATH = os.path.join(PROJECT_DIR, "data", "syzygy")
+
+# Transposition cache: cross-game persisted visit counts at MCTS roots.
+# Auto-loaded on engine/viz startup; saved on clean exit.
+MCTS_CACHE_PATH = os.path.join(PROJECT_DIR, "data", "mcts_cache.json")

@@ -146,7 +146,13 @@ class OpeningBook:
 
         if self._reader is not None:
             try:
-                entry = self._reader.choice(board)
+                # weighted_choice respects polyglot entry weights — mainlines
+                # get picked roughly in proportion to their popularity in the
+                # source database. The bare `.choice()` method is UNIFORM
+                # random, which means low-weight sidelines (e.g. Latvian
+                # Gambit at 0.1%) get picked as often as the top mainline.
+                # See issue #17 investigation by Wave-B agent B-BOOK.
+                entry = self._reader.weighted_choice(board)
             except IndexError:
                 return None
             except Exception:

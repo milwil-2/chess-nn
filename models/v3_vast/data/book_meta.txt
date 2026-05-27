@@ -1,0 +1,5 @@
+source: https://raw.githubusercontent.com/JaekeeAI/ecs170project/main/polyglot-collection/codekiddy.bin
+sha256: 46e8ad19a960bbc491a64d5b54ff3648b9ac2c10666cf0fc29dcfc08e249e79c
+size: 16484048 bytes
+prior: book.komodo.bin.bak (9.25 MB, github.com/gmcheems-org/free-opening-books/komodo.bin)
+swapped: 2026-05-27 (per issue #17, after weighted_choice fix)

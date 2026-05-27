@@ -8,8 +8,12 @@
 # never committed). See PROJECT_SUMMARY.md → Opt-in inference helpers.
 # Syzygy 3-4-5 tablebases (~1 GB)
 **/data/syzygy/
-# Polyglot opening book (~10 MB)
+# Polyglot opening books and any backup-of-prior-book copies
 **/data/book.bin
+**/data/book.*.bak
+**/data/book.*.bin
+# Generic backup pattern (belt-and-suspenders)
+*.bak
 # Cross-game MCTS transposition cache (grows)
 **/data/mcts_cache.json
 **/data/mcts_cache.json.tmp
