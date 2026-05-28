@@ -1,0 +1,3 @@
+# Treat Colab notebooks as documentation so GitHub language stats reflect the
+# Python codebase, not the notebooks (which are mostly setup boilerplate).
+*.ipynb linguist-documentation
