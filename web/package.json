@@ -1,0 +1,34 @@
+{
+  "name": "chess-nn-web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Web showcase for the chess-nn AlphaZero-style engine: play a selectable-Elo Stockfish in-browser while the homemade network and Stockfish give side-by-side move recommendations.",
+  "scripts": {
+    "setup-assets": "node scripts/copy-assets.mjs",
+    "predev": "node scripts/copy-assets.mjs",
+    "dev": "vite",
+    "prebuild": "node scripts/copy-assets.mjs",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "export-model": "echo 'run web/scripts/export_onnx.py with the torch venv — see web/README.md'"
+  },
+  "dependencies": {
+    "chess.js": "^1.4.0",
+    "onnxruntime-web": "^1.26.0",
+    "react": "^19.0.0",
+    "react-chessboard": "^5.10.0",
+    "react-dom": "^19.0.0",
+    "stockfish": "^16.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "typescript": "^5.6.3",
+    "vite": "^6.0.5",
+    "vitest": "^2.1.8"
+  }
+}

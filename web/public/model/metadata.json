@@ -1,0 +1,16 @@
+{
+  "model": "chessnet-v3",
+  "inputPlanes": 105,
+  "policySize": 4672,
+  "historyLength": 8,
+  "quantization": "int8",
+  "paramCount": 5623835,
+  "fileBytes": 5755020,
+  "valueOrder": [
+    "win",
+    "draw",
+    "loss"
+  ],
+  "opset": 17,
+  "exportedAt": "2026-05-28T14:56:49.777811Z"
+}

@@ -1,0 +1,17 @@
+node_modules
+dist
+dist-ssr
+*.local
+.vite
+coverage
+
+# Third-party runtime binaries copied from node_modules by scripts/copy-assets.mjs
+# (regenerated on `npm run setup-assets` / predev / prebuild — not committed).
+public/stockfish/
+
+# Editor
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+.vercel

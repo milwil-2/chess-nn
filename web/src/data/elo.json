@@ -1,0 +1,14 @@
+{
+  "note": "Single gauntlet snapshot of v3_vast (checkpoint daf568589868) vs Stockfish on 2026-05-26. Elo estimates carry WIDE confidence intervals — this is a one-time measurement of the full engine (MCTS + inference helpers), NOT an upward training curve. The network embedded in this page is raw policy with no search, so it plays weaker than these numbers.",
+  "checkpoint": "daf568589868",
+  "date": "2026-05-26",
+  "headline": [
+    { "level": null, "tc": "10+0.1", "elo": 872.3, "ciLow": 508.7, "ciHigh": 1235.9, "games": 25 },
+    { "level": null, "tc": "8+0.1", "elo": 706.4, "ciLow": 366.5, "ciHigh": 1046.3, "games": 25 }
+  ],
+  "rows": [
+    { "level": 1600, "tc": "5+0.1/1+0.02", "elo": 1298.7, "ciLow": 400.2, "ciHigh": 1508.5, "games": 10, "decisiveRate": 0.7, "meanPlies": 73.8 },
+    { "level": 1800, "tc": "5+0.1/1+0.02", "elo": 1288.5, "ciLow": 600.2, "ciHigh": 1542.5, "games": 10, "decisiveRate": 0.9, "meanPlies": 69.8 }
+  ],
+  "aggregate": { "level": null, "tc": "5+0.1/1+0.02", "elo": 1292.8, "ciLow": 589.2, "ciHigh": 1996.3, "games": 20 }
+}
