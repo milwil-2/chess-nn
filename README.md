@@ -10,9 +10,6 @@ The engine learns from human games (supervised) and then from its own play
 (reinforcement learning), and can be driven through a Pygame visualizer, a UCI
 adapter (for cutechess / Lichess), or direct head-to-head matches.
 
-> For a dense, internal-facing reference of every constant and code path, see
-> [`PROJECT_SUMMARY.md`](PROJECT_SUMMARY.md). This README is the high-level tour.
-
 ---
 
 ## Current architecture
@@ -110,9 +107,8 @@ weak moves (early king walks, hung pieces) — and most of the work targets that
 - **Value-probe harness** — measures value-head MAE across position categories
   (symmetric / advantage / opening / endgame) to detect side-to-move bias.
 
-See [`template/docs/improvements.md`](template/docs/improvements.md) for the
-research-backed roadmap of what's shipped and what's planned next (opponent-policy
-head, forced playouts, playout-cap randomization, transformer body).
+What's shipped and what's planned next — opponent-policy head, forced playouts,
+playout-cap randomization, a transformer body — is tracked in a research roadmap.
 
 ---
 
@@ -123,12 +119,10 @@ chess-nn/
   template/              canonical codebase — copied per-variant by new_model.py
     chess_nn/            model, encodings, MCTS, training, inference helpers
     viz/                 Pygame + web visualizers
-    docs/improvements.md research roadmap
   models/<variant>/      self-contained snapshots (v1_history8, v2_vast, v3_vast, ...)
   scripts/               chessnn_uci.sh (UCI launcher), plot_elo.py
   match.py               head-to-head between any two variants
   new_model.py           create a new variant from the template
-  PROJECT_SUMMARY.md     dense internal reference
 ```
 
 Each variant carries its own `config.py`, checkpoints, and data — so editing

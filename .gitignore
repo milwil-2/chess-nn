@@ -39,3 +39,9 @@ __pycache__/
 .claude/
 # Local bot credentials
 .env
+
+# Internal architecture / agent docs — kept local only, NOT published.
+/PROJECT_SUMMARY.md
+AGENTS.md
+**/docs/concepts.md
+**/docs/improvements.md
