@@ -34,3 +34,8 @@ __pycache__/
 *.pth
 .DS_Store
 .venv/
+
+# Claude Code runtime artifacts (scheduled-task locks etc)
+.claude/
+# Local bot credentials
+.env
