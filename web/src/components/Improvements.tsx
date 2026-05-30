@@ -1,5 +1,5 @@
-// Improvements / "what I learned" — grouped cards, each with a one-line
-// "why it matters".
+// Improvements — grouped cards covering data/supervision, architecture,
+// search/MCTS, and inference-time helpers.
 import type { ReactNode } from "react";
 
 interface Item {
@@ -23,15 +23,15 @@ const GROUPS: Group[] = [
             Rating floor → <code>MIN_RATING 1800</code>
           </>
         ),
-        why: "Bad moves in the training set become moves the network thinks are valid. A higher floor means fewer blunders to imitate.",
+        why: "Raised from 1500 (v2) so the network learns from fewer blunders. Was 2000 in v1 local, dropped to 1500 in v2, settled at 1800 in v3.",
       },
       {
         name: <>Stockfish auxiliary loss</>,
-        why: "20% of positions get Stockfish's best move (depth 12) as an extra policy target — engine-quality ground truth pulling the policy straight.",
+        why: "20% of positions are annotated with Stockfish's best move (depth 12) and added as an auxiliary policy target with SF_LOSS_WEIGHT = 0.3.",
       },
       {
-        name: <>Tactical 3× oversampling</>,
-        why: "Positions with a hanging piece or fork are sampled three times as often, so the net actually practises the sharp moments instead of glossing over them.",
+        name: <>Tactical 3x oversampling</>,
+        why: "Positions containing a hanging piece or fork (detected via tactics.py) are sampled 3x during training.",
       },
     ],
   },
@@ -41,15 +41,15 @@ const GROUPS: Group[] = [
     items: [
       {
         name: <>Squeeze-and-Excitation blocks</>,
-        why: "Cheap channel-wise attention that consistently helps — the network learns which feature maps matter for a given position.",
+        why: "Cheap channel-wise attention (reduction 4) applied inside each residual block before the skip-add.",
       },
       {
         name: <>WDL value head</>,
-        why: "Three-class win/draw/loss instead of a single scalar — far better calibrated for draw-heavy chess.",
+        why: "3-class win/draw/loss softmax instead of a single scalar, better calibrated for draw-heavy chess. Collapsed to P(win) - P(loss) for search.",
       },
       {
         name: <>8-frame board history</>,
-        why: "Eight stacked frames expose piece trajectories and repetition that a single snapshot can't show.",
+        why: "8 stacked frames let the network see piece trajectories and repetition that a single-frame encoding can't show.",
       },
     ],
   },
@@ -59,11 +59,11 @@ const GROUPS: Group[] = [
     items: [
       {
         name: <>Subtree reuse</>,
-        why: "The tree under the played move carries into the next search instead of being thrown away — effectively free simulations.",
+        why: "The MCTS subtree under the chosen move is carried into the next search instead of rebuilt from scratch.",
       },
       {
-        name: <>Shaped Dirichlet noise</>,
-        why: "Root exploration noise is restricted to plausible moves, so self-play stops poisoning the training data with early-king-walk junk.",
+        name: <>Shaped Dirichlet noise (KataGo)</>,
+        why: "Root exploration noise is restricted to plausible moves via DIRICHLET_SHAPE_FLOOR, so self-play doesn't add low-prior moves (e.g. early king pushes) to the training targets.",
       },
       {
         name: (
@@ -71,7 +71,7 @@ const GROUPS: Group[] = [
             Root policy temperature <code>T = 1.5</code>
           </>
         ),
-        why: "Flattening over-confident priors at the root lets search actually consider the tactical alternatives it would otherwise ignore.",
+        why: "Policy logits are flattened by T before the root softmax (swept value: 1.50), so search considers tactical alternatives that the raw policy was over-confident against.",
       },
     ],
   },
@@ -81,15 +81,15 @@ const GROUPS: Group[] = [
     items: [
       {
         name: <>Opening book + Syzygy tablebases</>,
-        why: "Principled, varied openings and perfect 3-4-5-man endgame play — bolted on at play time only.",
+        why: "Weighted Polyglot (codekiddy) opening lookups and 3-4-5-man Syzygy probing with distance-to-zero tie-breaking. Engine-side only.",
       },
       {
         name: <>Transposition cache</>,
-        why: "Persisted MCTS visit counts warm-start positions the engine has seen before, across games.",
+        why: "Persisted MCTS visit counts, segmented per-checkpoint and auto-saved, mixed into priors to warm-start positions seen in earlier games.",
       },
       {
         name: <>Blunder filter</>,
-        why: "At the root, prune moves that hang material unless they're a capture or check. Kept out of training so the policy isn't contaminated by hand-coded rules.",
+        why: "At the root, prune moves that hang material unless the move itself is a capture or check. Never used during self-play so the learned policy stays uncontaminated.",
       },
     ],
   },
@@ -100,12 +100,12 @@ export default function Improvements() {
     <section id="improvements" className="section">
       <div className="wrap">
         <div className="section-head">
-          <span className="kicker">What I learned</span>
-          <h2 className="section-title">The fixes that moved the needle</h2>
+          <span className="kicker">Improvements</span>
+          <h2 className="section-title">Improvements</h2>
           <p className="section-sub">
-            A deliberate rule runs through all of this: the hand-coded helpers (book, tablebases,
-            cache, blunder filter) are used only at play time and never during self-play, so the
-            learned policy stays honest.
+            The hand-coded inference helpers (opening book, Syzygy tablebases, transposition cache,
+            blunder filter) are used only at play time and never during self-play, so the learned
+            policy is not contaminated by hand-coded heuristics.
           </p>
         </div>
 

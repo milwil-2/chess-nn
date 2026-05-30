@@ -1,5 +1,5 @@
-// Strength section — honest rendering of the single gauntlet snapshot, with
-// CI error bars. NOT framed as an upward progression.
+// Strength — single-day gauntlet snapshot with CI error bars. Not a
+// training curve.
 import eloData from "../data/elo.json";
 
 interface Row {
@@ -55,13 +55,14 @@ export default function Strength() {
       <div className="wrap">
         <div className="section-head">
           <span className="kicker">Strength</span>
-          <h2 className="section-title">Honestly: it's weak — for now</h2>
+          <h2 className="section-title">Strength</h2>
           <p className="section-sub">
-            This is a <strong>single gauntlet snapshot</strong> of v3_vast against Stockfish on one
-            day, with wide confidence intervals — not a training curve trending upward. The
-            estimate lands somewhere around 700–870 Elo for the full engine. Training has been
-            bounded by available compute — limited GPU time and dataset size on rented hardware —
-            which is the main thing capping strength so far.
+            Current v3_vast strength is roughly ~700 Elo on the local Stockfish gauntlet — weak,
+            which is what the next training cycle aims to fix. This is a{" "}
+            <strong>single gauntlet snapshot</strong> against Stockfish on one day with wide
+            confidence intervals, not a training curve. The estimate lands around 700–870 Elo for
+            the full engine. Training has been bounded by available compute (limited GPU time and
+            dataset size on rented hardware), which is the main cap on strength so far.
           </p>
         </div>
 
@@ -88,8 +89,8 @@ export default function Strength() {
 
           <p className="caption">
             Blue points are the full engine (MCTS + inference helpers); green points are per-level
-            sweeps. The whiskers are the 95% confidence intervals — they're enormous because each
-            data point is only a handful of games. The network you can play above is{" "}
+            sweeps. The whiskers are 95% confidence intervals — wide because each data point is
+            only a handful of games. The network used in the browser above is{" "}
             <strong>raw policy with no search</strong>, so it plays noticeably weaker than these
             gauntlet numbers.
           </p>

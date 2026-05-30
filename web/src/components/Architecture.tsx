@@ -1,7 +1,8 @@
-// Architecture section — a clean CSS/SVG-ish diagram of the network.
+// Architecture section — diagram of the network: input planes, residual
+// tower, and the policy + value heads.
 export default function Architecture() {
-  // 105 input planes: 96 piece planes (8 frames × 12) + 9 meta. Render a small
-  // mosaic that's mostly "piece" with a meta tail.
+  // 105 input planes: 96 piece planes (8 frames × 12) + 9 meta. The mosaic
+  // is mostly "piece" with a 4-cell "meta" tail.
   const planeCells = Array.from({ length: 36 }, (_, i) => (i < 32 ? "piece" : "meta"));
 
   return (
@@ -9,11 +10,12 @@ export default function Architecture() {
       <div className="wrap">
         <div className="section-head">
           <span className="kicker">Architecture</span>
-          <h2 className="section-title">A residual CNN with two heads</h2>
+          <h2 className="section-title">Network</h2>
           <p className="section-sub">
-            The network reads a stack of board planes, pushes them through a residual tower with
-            channel attention, and splits into a move-policy head and a win/draw/loss value head —
-            roughly 5.6 million parameters, trained from scratch in PyTorch.
+            A residual CNN with two heads: a stack of board planes goes through a 10-block residual
+            tower with Squeeze-and-Excitation channel attention, then splits into a 4672-move
+            policy head and a 3-class win/draw/loss value head. Roughly 5.6M parameters, trained
+            from scratch in PyTorch.
           </p>
         </div>
 
@@ -23,8 +25,8 @@ export default function Architecture() {
             <h4>105 planes</h4>
             <p>
               8 history frames × 12 piece planes (96) + 9 meta planes: castling, en passant,
-              side-to-move, 50-move clock, repetition. The board is mirrored when Black moves so
-              "my pieces" always sit in the same channels.
+              side-to-move, 50-move clock, repetition. The board is mirrored when Black is to move,
+              so the side-to-move's pieces always sit in a fixed set of channels.
             </p>
             <div className="plane-stack">
               {planeCells.map((kind, i) => (

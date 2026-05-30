@@ -1,29 +1,19 @@
-// =====================================================================
-// Move encoding — TypeScript port of
-//   models/v3_vast/chess_nn/move_encoding.py :: move_to_index / index_to_move
-//
-// AlphaZero encoding: 73 move planes * 64 source squares = 4672.
-//   planes 0-55:  queen-style moves (8 dirs * 7 distances; also pawns)
-//   planes 56-63: knight moves (8 L-shapes)
-//   planes 64-72: underpromotions (3 dirs * 3 pieces; queen-promo reuses 0-55)
-// Coordinates are taken from the CURRENT player's perspective (board flipped
-// vertically when black is to move).
-// =====================================================================
+// Port of models/v3_vast/chess_nn/move_encoding.py — AlphaZero 73*64 policy.
 import { Chess } from "chess.js";
 import type { Color, PieceSymbol } from "chess.js";
 
 export const POLICY_SIZE = 4672;
 
-// (dr, dc) per single step. Order MUST match the Python DIRECTIONS list.
+// Order MUST match the Python DIRECTIONS list.
 const DIRECTIONS: ReadonlyArray<[number, number]> = [
-  [1, 0], // N
-  [1, 1], // NE
-  [0, 1], // E
-  [-1, 1], // SE
-  [-1, 0], // S
-  [-1, -1], // SW
-  [0, -1], // W
-  [1, -1], // NW
+  [1, 0],
+  [1, 1],
+  [0, 1],
+  [-1, 1],
+  [-1, 0],
+  [-1, -1],
+  [0, -1],
+  [1, -1],
 ];
 
 const KNIGHT_DELTAS: ReadonlyArray<[number, number]> = [
@@ -37,10 +27,8 @@ const KNIGHT_DELTAS: ReadonlyArray<[number, number]> = [
   [-1, -2],
 ];
 
-// Underpromotion target pieces, in order: knight, bishop, rook.
 const UNDERPROMO_PIECES: ReadonlyArray<PieceSymbol> = ["n", "b", "r"];
-// Underpromo directions (dr, dc) from current player's POV: capture-left,
-// straight, capture-right (pawn always moves "up" => dr = +1).
+// From the current player's POV (pawn always moves "up" => dr = +1).
 const UNDERPROMO_DIRS: ReadonlyArray<[number, number]> = [
   [1, -1],
   [1, 0],
@@ -60,20 +48,11 @@ function indexOfDelta(
 
 function squareToRankFile(square: string): { rank: number; file: number } {
   return {
-    file: square.charCodeAt(0) - 97, // 'a' -> 0
-    rank: square.charCodeAt(1) - 49, // '1' -> 0
+    file: square.charCodeAt(0) - 97,
+    rank: square.charCodeAt(1) - 49,
   };
 }
 
-/**
- * Convert a move to a policy index (0-4671).
- *
- * @param from       source square, e.g. "e2"
- * @param to         destination square, e.g. "e4"
- * @param piece      moving piece type (chess.js PieceSymbol)
- * @param promotion  promotion piece type or undefined
- * @param turn       side to move ('w' | 'b') — controls the perspective flip
- */
 export function moveToIndex(
   from: string,
   to: string,
@@ -99,9 +78,8 @@ export function moveToIndex(
   const dr = toRank - fromRank;
   const dc = toFile - fromFile;
 
-  const sourceSquareIdx = fromRank * 8 + fromFile; // 0-63
+  const sourceSquareIdx = fromRank * 8 + fromFile;
 
-  // --- Underpromotion? (anything but queen) ---
   if (promotion !== undefined && promotion !== "q") {
     const pieceIdx = UNDERPROMO_PIECES.indexOf(promotion);
     const dirIdx = indexOfDelta(UNDERPROMO_DIRS, dr, dc);
@@ -109,19 +87,17 @@ export function moveToIndex(
     return sourceSquareIdx * 73 + plane;
   }
 
-  // --- Knight move? ---
   if (piece === "n") {
     const knightIdx = indexOfDelta(KNIGHT_DELTAS, dr, dc);
     const plane = 56 + knightIdx;
     return sourceSquareIdx * 73 + plane;
   }
 
-  // --- Queen-style move (includes pawns + queen promotions) ---
   const distance = Math.max(Math.abs(dr), Math.abs(dc));
   const unitDr = dr !== 0 ? Math.trunc(dr / distance) : 0;
   const unitDc = dc !== 0 ? Math.trunc(dc / distance) : 0;
   const dirIdx = indexOfDelta(DIRECTIONS, unitDr, unitDc);
-  const plane = dirIdx * 7 + (distance - 1); // 0-55
+  const plane = dirIdx * 7 + (distance - 1);
   return sourceSquareIdx * 73 + plane;
 }
 
@@ -129,11 +105,7 @@ function rankFileToSquare(file: number, rank: number): string {
   return String.fromCharCode(97 + file) + String.fromCharCode(49 + rank);
 }
 
-/**
- * Inverse of moveToIndex. Returns a UCI string, or null if the index does not
- * land on the board. (Promotion suffix appended for pawns reaching the back
- * rank; queen by default, underpromotion piece otherwise.)
- */
+/** Inverse of moveToIndex. Returns null if the index does not land on the board. */
 export function indexToMove(index: number, turn: Color): string | null {
   const flip = turn === "b";
 
@@ -175,19 +147,13 @@ export function indexToMove(index: number, turn: Color): string | null {
   const fromSq = rankFileToSquare(fromFile, actualFromRank);
   const toSq = rankFileToSquare(toFile, actualToRank);
 
-  // Queen promotion default: pawn reaching the (perspective-flipped) back rank
-  // lands on rank 8 for white / rank 1 for black. We can't know the piece type
-  // here without the board, so callers should match against legal moves; this
-  // helper is primarily exercised via the legal-index map in policy.ts.
+  // We can't know piece type without the board, so callers should match
+  // against legal moves; this helper is primarily exercised via legalMoveEntries.
   let suffix = "";
   if (promotion !== undefined) suffix = promotion;
   return fromSq + toSq + suffix;
 }
 
-/**
- * Map every legal move in the position to its policy index.
- * Returns parallel info needed for building suggestions.
- */
 export interface LegalMoveEntry {
   index: number;
   uci: string;
@@ -204,7 +170,6 @@ export function legalMoveEntries(chess: Chess): LegalMoveEntry[] {
   });
 }
 
-/** Policy indices of all legal moves (mirrors get_legal_move_indices). */
 export function legalMoveIndices(chess: Chess): number[] {
   return legalMoveEntries(chess).map((e) => e.index);
 }

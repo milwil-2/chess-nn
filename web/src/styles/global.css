@@ -34,10 +34,7 @@ body,
   min-height: 100%;
 }
 body {
-  background:
-    radial-gradient(1200px 600px at 80% -10%, #14142400 0%, var(--bg) 60%),
-    radial-gradient(900px 500px at -5% 0%, #10202000 0%, var(--bg) 55%),
-    var(--bg);
+  background: var(--bg);
   color: var(--text);
   font-family:
     "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -142,7 +139,6 @@ code,
   height: 9px;
   border-radius: 50%;
   background: var(--accent);
-  box-shadow: 0 0 12px var(--accent);
 }
 .nav-links {
   display: flex;
@@ -168,18 +164,6 @@ code,
   padding: 96px 0 56px;
   position: relative;
   overflow: hidden;
-}
-.hero-grid::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background-image:
-    linear-gradient(var(--border-soft) 1px, transparent 1px),
-    linear-gradient(90deg, var(--border-soft) 1px, transparent 1px);
-  background-size: 44px 44px;
-  mask-image: radial-gradient(700px 400px at 70% 20%, #000 0%, transparent 75%);
-  opacity: 0.5;
-  pointer-events: none;
 }
 .hero h1 {
   font-size: clamp(34px, 6vw, 58px);

@@ -1,8 +1,3 @@
-// =====================================================================
-// Parity test: verify the TypeScript encoding reproduces the authoritative
-// torch-computed fixtures exactly (STRICT), and that the int8 ONNX model
-// reproduces the policy/value within tolerance (TOLERANT — int8 drift).
-// =====================================================================
 import { describe, it, expect, beforeAll } from "vitest";
 import { readFileSync } from "node:fs";
 import * as path from "node:path";
@@ -45,7 +40,6 @@ ort.env.wasm.wasmPaths = ORT_DIST + path.sep;
 ort.env.wasm.numThreads = 1;
 ort.env.logLevel = "error";
 
-// Tolerances (per spec).
 const ATOL_PLANE = 1e-4;
 const ATOL_CHECKSUM = 1e-3;
 const ATOL_WDL = 0.06;
@@ -133,7 +127,6 @@ describe("ONNX inference parity (TOLERANT — int8 drift)", () => {
 
       const netTop = result.topMoves.map((m) => m.uci);
 
-      // Fixture's #1 move must be within the net's top-3.
       const fixtureBest = fx.topMoves[0].uci;
       expect(
         netTop.slice(0, 3),
@@ -142,7 +135,6 @@ describe("ONNX inference parity (TOLERANT — int8 drift)", () => {
           .join(",")}`
       ).toContain(fixtureBest);
 
-      // >= 3 overlap between net top-5 and fixture top-5 (by uci).
       const netTop5 = new Set(netTop.slice(0, 5));
       const fxTop5 = fx.topMoves.slice(0, 5).map((m) => m.uci);
       const overlap = fxTop5.filter((u) => netTop5.has(u)).length;
@@ -153,7 +145,6 @@ describe("ONNX inference parity (TOLERANT — int8 drift)", () => {
         )} fx=${fxTop5.join(",")}`
       ).toBeGreaterThanOrEqual(3);
 
-      // WDL components within atol.
       for (let i = 0; i < 3; i++) {
         expect(
           Math.abs(result.wdl[i] - fx.wdl[i]),

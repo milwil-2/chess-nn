@@ -1,5 +1,3 @@
-// Vertical eval bar driven by Stockfish centipawns (always White-relative),
-// with an optional second tick for the net's WDL scalar.
 interface EvalBarProps {
   /** Centipawns from WHITE's POV (positive = white better). null when mate/unknown. */
   whiteCp: number | null;
@@ -9,9 +7,8 @@ interface EvalBarProps {
   netScalarWhite?: number | null;
 }
 
-/** Logistic squash of centipawns -> [0,1] white-advantage fraction. */
 function cpToFraction(cp: number): number {
-  // ~ matches lichess eval bar feel; 4 pawns ≈ 0.9.
+  // ~matches the lichess eval bar feel; 4 pawns ≈ 0.9.
   return 1 / (1 + Math.pow(10, -cp / 400));
 }
 
@@ -34,7 +31,6 @@ export default function EvalBar({ whiteCp, whiteMate, netScalarWhite }: EvalBarP
 
   const whiteHeightPct = frac * 100;
 
-  // Net tick: map [-1,1] white scalar onto bar bottom-offset percentage.
   const netTick =
     netScalarWhite === null || netScalarWhite === undefined
       ? null

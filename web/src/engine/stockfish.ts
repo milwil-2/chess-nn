@@ -1,29 +1,15 @@
-// =====================================================================
-// Stockfish 16 (single-threaded WASM) UCI worker wrapper.
-//
-// Assets live together in `public/stockfish/`:
-//   stockfish-nnue-16-single.js   (the worker script)
-//   stockfish-nnue-16-single.wasm (the engine)
-//   nn-5af11540bbfe.nnue          (38MB NNUE eval — lazy loaded by the engine)
-//
-// The single-threaded build runs WITHOUT COOP/COEP cross-origin-isolation
-// headers, so it works on a plain static host. Because the NNUE is large the
-// worker is only spun up on first use (see `createStockfish` -> lazy `boot()`).
-//
-// UCI is a line-oriented streaming protocol over postMessage. We serialize all
-// commands through a single-slot job queue so two overlapping `bestMove` /
-// `analyze` calls can't interleave their `info`/`bestmove` lines.
-// =====================================================================
+// Stockfish 16 single-threaded WASM UCI wrapper. The single-threaded build
+// runs WITHOUT COOP/COEP headers, so it works on a plain static host. Assets
+// (worker .js, .wasm, NNUE) ship together in public/stockfish/.
 import { Chess } from "chess.js";
 import type { MoveSuggestion, SfAnalysis, StockfishEngine } from "./types";
 
-/** SF16 honours UCI_Elo roughly in this band. Below the floor we fall back to Skill Level. */
+/** SF16 honours UCI_Elo in this band. Below the floor we fall back to Skill Level. */
 const UCI_ELO_MIN = 1320;
 const UCI_ELO_MAX = 3190;
 
 type Listener = (line: string) => void;
 
-/** Convert a uci move ("e2e4", "e7e8q") to SAN in the given FEN, best-effort. */
 function uciToSan(fen: string, uci: string): string {
   if (!uci || uci.length < 4) return uci;
   try {
@@ -43,18 +29,16 @@ export function createStockfish(): StockfishEngine {
   let worker: Worker | null = null;
   let bootPromise: Promise<void> | null = null;
 
-  // Listeners receive every raw line; jobs subscribe transiently.
   const listeners = new Set<Listener>();
 
-  // Single-slot serialization: each enqueued job runs to completion (its
-  // resolver fires on the terminating UCI line) before the next begins.
+  // Serialize commands so two overlapping bestMove/analyze calls can't
+  // interleave their info/bestmove lines on the shared UCI stream.
   let queue: Promise<unknown> = Promise.resolve();
 
   function post(cmd: string) {
     worker?.postMessage(cmd);
   }
 
-  /** Send a command and resolve once `predicate(line)` returns true. */
   function send<T>(cmd: string | string[], predicate: (line: string) => T | undefined): Promise<T> {
     return new Promise<T>((resolve) => {
       const listener: Listener = (line) => {
@@ -70,7 +54,6 @@ export function createStockfish(): StockfishEngine {
     });
   }
 
-  /** Chain a job onto the serial queue. */
   function enqueue<T>(job: () => Promise<T>): Promise<T> {
     const run = queue.then(job, job);
     // Keep the queue alive regardless of individual job outcome.
@@ -90,10 +73,9 @@ export function createStockfish(): StockfishEngine {
         const line = typeof e.data === "string" ? e.data : String(e.data ?? "");
         for (const l of [...listeners]) l(line);
       };
-      // UCI handshake: uci -> uciok, then isready -> readyok.
       await send("uci", (l) => (l.startsWith("uciok") ? true : undefined));
-      // Point the engine at the NNUE that ships alongside the worker. SF16
-      // resolves relative to the worker script, so the bare filename works.
+      // SF16 resolves EvalFile relative to the worker script, so the bare
+      // filename matches our public/stockfish/ layout.
       post("setoption name EvalFile value nn-5af11540bbfe.nnue");
       post("setoption name Use NNUE value true");
       await send("isready", (l) => (l.startsWith("readyok") ? true : undefined));
@@ -109,24 +91,21 @@ export function createStockfish(): StockfishEngine {
     await boot();
     return enqueue(async () => {
       if (elo === null) {
-        // Analyst / full strength.
         post("setoption name UCI_LimitStrength value false");
         post("setoption name Skill Level value 20");
       } else if (elo >= UCI_ELO_MIN) {
-        // Native Elo limiting (≈1320–3190).
         const clamped = Math.min(UCI_ELO_MAX, Math.round(elo));
         post("setoption name Skill Level value 20");
         post("setoption name UCI_LimitStrength value true");
         post(`setoption name UCI_Elo value ${clamped}`);
       } else {
-        // Below the UCI_Elo floor: map the requested rating onto Skill Level
-        // 0..20. ~800 Elo -> skill 0, the 1320 floor -> skill ~8.
+        // Below the UCI_Elo floor: map onto Skill Level 0..20.
+        // ~800 Elo -> skill 0, the 1320 floor -> skill ~8.
         const t = Math.max(0, (elo - 600) / (UCI_ELO_MIN - 600));
         const skill = Math.max(0, Math.min(20, Math.round(t * 8)));
         post("setoption name UCI_LimitStrength value false");
         post(`setoption name Skill Level value ${skill}`);
       }
-      // Flush the option changes.
       await send("isready", (l) => (l.startsWith("readyok") ? true : undefined));
     });
   }
@@ -152,7 +131,6 @@ export function createStockfish(): StockfishEngine {
     await boot();
     const depth = opts?.depth ?? 15;
     return enqueue(async () => {
-      // Track the deepest `info` line seen; resolve on `bestmove`.
       let scoreCp: number | null = null;
       let mate: number | null = null;
       let reachedDepth = 0;
@@ -187,7 +165,6 @@ export function createStockfish(): StockfishEngine {
       );
 
       const best: MoveSuggestion = { uci: bestUci, san: uciToSan(fen, bestUci) };
-      // Prefer the pv's first move as the "best" when present (matches bestmove).
       if (pv.length && pv[0] !== bestUci) {
         best.uci = pv[0];
         best.san = uciToSan(fen, pv[0]);

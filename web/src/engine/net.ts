@@ -1,8 +1,3 @@
-// =====================================================================
-// NetEngine — in-browser inference of the chess-nn v3 ONNX model via
-// onnxruntime-web. Replays the move history into the 105-plane tensor,
-// runs the model, and post-processes policy/value into a NetResult.
-// =====================================================================
 import * as ort from "onnxruntime-web";
 import { Chess } from "chess.js";
 import type { NetEngine, NetResult } from "./types";
@@ -15,12 +10,11 @@ const DEFAULT_MODEL_URL = BASE + "model/chessnet-v3.onnx";
 export function createNetEngine(modelUrl?: string): NetEngine {
   const url = modelUrl ?? DEFAULT_MODEL_URL;
 
-  // onnxruntime-web wasm config (browser). Single-threaded keeps it simple and
-  // avoids cross-origin-isolation requirements for SharedArrayBuffer. The wasm
-  // runtime is loaded from jsDelivr (pinned to the installed version): ort
-  // dynamically imports its .mjs glue, which Vite refuses to serve from /public,
-  // and self-hosting the ~26MB runtime bloats the deploy. The custom model
-  // itself is still self-hosted (DEFAULT_MODEL_URL above).
+  // Single-threaded avoids cross-origin-isolation requirements for
+  // SharedArrayBuffer. The wasm runtime is loaded from jsDelivr (pinned to
+  // the installed version) because ort dynamically imports its .mjs glue,
+  // which Vite refuses to serve from /public, and self-hosting the ~26MB
+  // runtime bloats the deploy.
   ort.env.wasm.wasmPaths =
     "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.26.0/dist/";
   ort.env.wasm.numThreads = 1;
@@ -66,7 +60,6 @@ export function createNetEngine(modelUrl?: string): NetEngine {
         const policy = outputs.policy.data as Float32Array;
         const value = outputs.value.data as Float32Array;
 
-        // Reconstruct the current position so we can legal-mask + produce SAN.
         const chess = new Chess(startFen);
         for (const uci of movesUci) {
           chess.move({

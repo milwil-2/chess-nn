@@ -1,17 +1,6 @@
-// =====================================================================
-// EngineBoard — the centerpiece.
-//
-// Game state is held as (startFen, movesUci[]) so the net gets the real move
-// history to rebuild its 8-frame board encoding. A chess.js instance is
-// derived from those for legality / SAN / game-over. Loading a raw FEN resets
-// (startFen = that fen, moves = []).
-//
-// Flow: human drags a legal move -> push to movesUci -> if it's now the
-// opponent's turn, Stockfish@Elo replies via bestMove() -> push. After every
-// settled position we query net.evaluate(startFen, moves) AND analyst.analyze()
-// and render live. The net's top move (green) and Stockfish's best (blue) are
-// drawn as board arrows.
-// =====================================================================
+// Game state is (startFen, movesUci[]) so the net rebuilds its 8-frame
+// history encoding from the real move list; chess.js is derived for legality
+// and SAN. Loading a raw FEN resets to (that fen, []).
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Chessboard } from "react-chessboard";
 import type { Arrow, PieceDropHandlerArgs } from "react-chessboard";
@@ -30,7 +19,6 @@ const SF_ACCENT = "#6aa0ff"; // var(--accent-2)
 
 type Color = "white" | "black";
 
-/** Rebuild a Chess from a start FEN + uci move list. Returns null on any illegal step. */
 function gameFrom(startFen: string, moves: string[]): Chess | null {
   try {
     const g = new Chess(startFen);
@@ -47,7 +35,6 @@ function gameFrom(startFen: string, moves: string[]): Chess | null {
   }
 }
 
-/** Flip a side-to-move-relative centipawn score to White's POV. */
 function toWhiteCp(scoreCp: number | null, whiteToMove: boolean): number | null {
   if (scoreCp === null) return null;
   return whiteToMove ? scoreCp : -scoreCp;
@@ -58,12 +45,10 @@ function toWhiteMate(mate: number | null, whiteToMove: boolean): number | null {
 }
 
 export default function EngineBoard() {
-  // Persistent engines (created once). Net is the parallel agent's stub for now.
   const opponentRef = useRef(createStockfish());
   const analystRef = useRef(createStockfish());
   const netRef = useRef(createNetEngine());
 
-  // Game state.
   const [startFen, setStartFen] = useState(START_FEN);
   const [moves, setMoves] = useState<string[]>([]);
   const [humanColor, setHumanColor] = useState<Color>("white");
@@ -71,11 +56,9 @@ export default function EngineBoard() {
   const [elo, setElo] = useState<number>(1500);
   const [showHints, setShowHints] = useState(true);
 
-  // FEN input.
   const [fenInput, setFenInput] = useState(START_FEN);
   const [fenError, setFenError] = useState<string | null>(null);
 
-  // Engine state / results.
   const [engineBooting, setEngineBooting] = useState(false);
   const [opponentThinking, setOpponentThinking] = useState(false);
   const [sf, setSf] = useState<SfAnalysis | null>(null);
@@ -84,14 +67,12 @@ export default function EngineBoard() {
   const [netLoading, setNetLoading] = useState(false);
   const [netReady, setNetReady] = useState(false);
 
-  // Derived game.
   const game = useMemo(() => gameFrom(startFen, moves) ?? new Chess(startFen), [startFen, moves]);
   const fen = game.fen();
   const whiteToMove = game.turn() === "w";
   const isGameOver = game.isGameOver();
   const humanTurn = !isGameOver && game.turn() === (humanColor === "white" ? "w" : "b");
 
-  // Probe whether the net engine actually produces output (real impl vs stub).
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -108,7 +89,6 @@ export default function EngineBoard() {
     };
   }, []);
 
-  // Cleanup engines on unmount.
   useEffect(() => {
     const opp = opponentRef.current;
     const analyst = analystRef.current;
@@ -118,18 +98,15 @@ export default function EngineBoard() {
     };
   }, []);
 
-  // Keep the analyst at full strength.
   useEffect(() => {
     void analystRef.current.setElo(null);
   }, []);
 
-  // Push the chosen opponent Elo down to the opponent engine.
   useEffect(() => {
     void opponentRef.current.setElo(elo);
   }, [elo]);
 
-  // ---- Analysis side-effect: after every settled position, query both engines.
-  // Guard with a token so a stale async result can't overwrite a newer position.
+  // Guard against stale async results overwriting a newer position.
   const analysisToken = useRef(0);
   useEffect(() => {
     const token = ++analysisToken.current;
@@ -145,7 +122,6 @@ export default function EngineBoard() {
       return;
     }
 
-    // Net (raw policy on the real history).
     if (netReady) {
       setNetLoading(true);
       setNetResult(null);
@@ -164,7 +140,6 @@ export default function EngineBoard() {
       setNetResult(null);
     }
 
-    // Stockfish analyst.
     setSfLoading(true);
     setSf(null);
     setEngineBooting(true);
@@ -185,7 +160,6 @@ export default function EngineBoard() {
       });
   }, [fen, startFen, moves, isGameOver, netReady]);
 
-  // ---- Opponent auto-reply when it's the engine's turn.
   const replyToken = useRef(0);
   useEffect(() => {
     if (isGameOver || humanTurn) return;
@@ -201,7 +175,7 @@ export default function EngineBoard() {
         setOpponentThinking(false);
         setEngineBooting(false);
         if (!mv.uci || mv.uci === "(none)") return;
-        // Validate the move is legal in the live position before committing.
+        // Validate legality against the live position before committing.
         const check = gameFrom(startFen, movesAtRequest);
         if (!check) return;
         try {
@@ -211,7 +185,7 @@ export default function EngineBoard() {
             promotion: mv.uci.length > 4 ? mv.uci[4] : undefined,
           });
         } catch {
-          return; // illegal — drop it
+          return;
         }
         setMoves((prev) =>
           prev === movesAtRequest ? [...prev, mv.uci] : prev,
@@ -226,14 +200,13 @@ export default function EngineBoard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fen, humanTurn, isGameOver]);
 
-  // ---- Human move via drag.
   const onPieceDrop = useCallback(
     ({ sourceSquare, targetSquare }: PieceDropHandlerArgs): boolean => {
       if (!targetSquare) return false;
       if (!humanTurn || opponentThinking) return false;
       const probe = gameFrom(startFen, moves);
       if (!probe) return false;
-      // Auto-queen promotions for the UI (most common choice).
+      // Auto-queen promotions in the UI.
       const piece = probe.get(sourceSquare as never);
       const isPromotion =
         piece?.type === "p" &&
@@ -249,13 +222,12 @@ export default function EngineBoard() {
         setMoves((prev) => [...prev, uci]);
         return true;
       } catch {
-        return false; // snapback
+        return false;
       }
     },
     [humanTurn, opponentThinking, startFen, moves],
   );
 
-  // ---- Controls.
   const newGame = useCallback(() => {
     analysisToken.current++;
     replyToken.current++;
@@ -281,7 +253,6 @@ export default function EngineBoard() {
     setMoves([]);
     setSf(null);
     setNetResult(null);
-    // Orient toward the side to move for convenience.
     const stm: Color = trimmed.split(/\s+/)[1] === "b" ? "black" : "white";
     setHumanColor(stm);
     setOrientation(stm);
@@ -291,7 +262,6 @@ export default function EngineBoard() {
     if (moves.length === 0) return;
     analysisToken.current++;
     replyToken.current++;
-    // Undo back to the human's previous turn (pop opponent reply + human move).
     setMoves((prev) => {
       const next = prev.slice(0, -1);
       return next;
@@ -307,7 +277,6 @@ export default function EngineBoard() {
     setOrientation(c);
   }, []);
 
-  // ---- Arrows (net top move + SF best move).
   const arrows: Arrow[] = useMemo(() => {
     if (!showHints || isGameOver) return [];
     const out: Arrow[] = [];
@@ -330,7 +299,6 @@ export default function EngineBoard() {
     return out;
   }, [showHints, isGameOver, netResult, sf]);
 
-  // ---- Board status line.
   let status = "";
   let gameOverFlag = false;
   if (game.isCheckmate()) {
@@ -376,7 +344,6 @@ export default function EngineBoard() {
 
   return (
     <div className="play">
-      {/* Board column */}
       <div className="board-col">
         <EvalBar whiteCp={whiteCp} whiteMate={whiteMate} netScalarWhite={netScalarWhite} />
         <div className="board-stage">
@@ -392,7 +359,6 @@ export default function EngineBoard() {
             {status}
           </div>
 
-          {/* Controls */}
           <div className="controls">
             <div className="controls-row">
               <div className="grow">
@@ -494,7 +460,6 @@ export default function EngineBoard() {
         </div>
       </div>
 
-      {/* Comparison column */}
       <div>
         <ComparisonPanel
           netResult={netResult}

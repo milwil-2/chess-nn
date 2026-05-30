@@ -1,23 +1,14 @@
-"""
-Export the trained ChessNet (v3) to ONNX for in-browser inference, and emit
-authoritative "parity fixtures" that a JavaScript reimplementation is validated
-against.
+"""Export the trained ChessNet (v3) to ONNX for in-browser inference and emit
+parity fixtures that the TypeScript reimplementation is validated against.
 
-Truth values (top moves, WDL, plane sums) are computed with **torch** — the
-authoritative model — so the fixtures never depend on onnxruntime. onnxruntime
-is used only for (a) optional int8 dynamic quantization to shrink the model and
-(b) a sanity re-check that the exported ONNX matches torch.
+Truth values (top moves, WDL, plane sums) come from torch; onnxruntime is used
+only for optional int8 dynamic quantization and a sanity re-check.
 
 Run with the torch venv, from the v3_vast dir so config.py / chess_nn resolve:
 
     cd models/v3_vast
     /Users/milan/Desktop/projects/chess-nn/models/v1_history8/.venv/bin/python \
         /Users/milan/Desktop/projects/chess-nn/web/scripts/export_onnx.py
-
-Outputs (absolute paths):
-    web/public/model/chessnet-v3.onnx
-    web/public/model/metadata.json
-    web/public/model/parity_fixtures.json
 """
 
 import datetime
@@ -28,8 +19,7 @@ import sys
 import numpy as np
 import torch
 
-# --- Resolve repo paths independent of cwd ---------------------------------
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))          # web/scripts
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, "..", ".."))
 V3_DIR = os.path.join(REPO_ROOT, "models", "v3_vast")
 OUT_DIR = os.path.join(REPO_ROOT, "web", "public", "model")
@@ -53,13 +43,8 @@ from chess_nn.move_encoding import policy_to_moves  # noqa: E402
 OPSET = 17
 
 
-# --- Model loading ----------------------------------------------------------
 def load_model() -> tuple[ChessNet, int]:
-    """Load the trained checkpoint into an eval-mode ChessNet on CPU.
-
-    The checkpoint stores weights under `model_state` with keys prefixed
-    `_orig_mod.` (an artifact of torch.compile); strip that prefix.
-    """
+    """Checkpoint keys are prefixed `_orig_mod.` (torch.compile artifact); strip it."""
     ckpt = torch.load(CHECKPOINT, map_location="cpu", weights_only=False)
     state = ckpt["model_state"]
     prefix = "_orig_mod."
@@ -75,14 +60,12 @@ def load_model() -> tuple[ChessNet, int]:
     return model, param_count
 
 
-# --- ONNX export ------------------------------------------------------------
 def export_onnx(model: ChessNet) -> None:
     dummy = torch.zeros(1, INPUT_PLANES, 8, 8, dtype=torch.float32)
-    # Use the legacy TorchScript exporter (dynamo=False): it embeds all weights
-    # as initializers in a single self-contained .onnx file (the dynamo path
-    # externalizes weights to a .data sidecar and emits opset-17 graphs the
-    # int8 quantizer can't shape-infer). The static net (no data-dependent
-    # control flow) traces cleanly.
+    # dynamo=False: the legacy TorchScript exporter embeds weights as
+    # initializers in a single .onnx file. The dynamo path externalizes weights
+    # to a .data sidecar and emits opset-17 graphs the int8 quantizer can't
+    # shape-infer. The static net (no data-dependent control flow) traces cleanly.
     with torch.no_grad():
         torch.onnx.export(
             model,
@@ -102,8 +85,7 @@ def export_onnx(model: ChessNet) -> None:
 
 
 def quantize() -> str:
-    """Try int8 dynamic quantization. Returns the quantization tag actually
-    achieved ("int8" or "fp32") and ensures ONNX_FINAL exists."""
+    """Try int8 dynamic quantization; fall back to copying the fp32 model."""
     try:
         from onnxruntime.quantization import QuantType, quantize_dynamic
 
@@ -122,7 +104,6 @@ def quantize() -> str:
 
 
 def validate_onnx(model: ChessNet, sample_tensor: np.ndarray) -> None:
-    """Sanity-check the exported (final) ONNX vs torch on one input. Best-effort."""
     try:
         import onnxruntime as ort
     except Exception as exc:  # pragma: no cover
@@ -139,29 +120,21 @@ def validate_onnx(model: ChessNet, sample_tensor: np.ndarray) -> None:
     print(f"[validate] policy MAD={p_mad:.4g}  value MAD={v_mad:.4g} (torch vs ONNX)")
 
 
-# --- Fixture construction ---------------------------------------------------
-# Each fixture: (name, startFen, [uci moves applied from startFen]).
+# Each fixture: (name, startFen, [uci moves applied from startFen]). The set
+# is chosen to cover: perspective flip, multi-frame history, tactical capture,
+# full castling rights, an endgame, and the repetition planes 103/104.
 FIXTURE_SPECS = [
-    # 1. Starting position, no history.
     ("startpos", chess.STARTING_FEN, []),
-    # 2. After 1.e4 — black to move, exercises the perspective flip.
     ("after_e4", chess.STARTING_FEN, ["e2e4"]),
-    # 3. Short opening line (Italian, ~8 plies) — exercises multi-frame history.
     ("italian_8ply", chess.STARTING_FEN,
      ["e2e4", "e7e5", "g1f3", "b8c6", "f1c4", "f8c5", "c2c3", "g8f6"]),
-    # 4. Tactical: white pawn can capture a hanging black queen (exd5).
     ("tactical_hanging_queen", "4k3/8/8/3q4/4P3/8/8/4K3 w - - 0 1", []),
-    # 5. Black-to-move single board (flip + single-board).
     ("black_to_move",
      "r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 2 3", []),
-    # 6. Full castling rights for both sides.
     ("castling_rights",
      "r3k2r/pppq1ppp/2np1n2/2b1p1B1/2B1P1b1/2NP1N2/PPPQ1PPP/R3K2R w KQkq - 0 1",
      []),
-    # 7. Simple K+Q vs K endgame.
     ("kqvk_endgame", "8/8/8/4k3/8/3Q4/4K3/8 w - - 0 1", []),
-    # 8. Repetition line: knights shuffle back to start, repeating the position
-    #    once — exercises repetition planes 103/104.
     ("repetition_line", chess.STARTING_FEN,
      ["g1f3", "g8f6", "f3g1", "f6g8", "g1f3", "g8f6"]),
 ]
@@ -182,7 +155,7 @@ def build_fixture(model: ChessNet, name: str, start_fen: str, moves: list[str]) 
     # boards[0] = current, then most-recent-first; truncate to HISTORY_LENGTH.
     boards = list(reversed(states))[:HISTORY_LENGTH]
 
-    tensor = boards_to_tensor(boards)  # (105, 8, 8) float32
+    tensor = boards_to_tensor(boards)
     assert tensor.shape == (INPUT_PLANES, 8, 8)
     plane_sums = tensor.reshape(INPUT_PLANES, 64).sum(axis=1).tolist()
     input_checksum = float(sum(plane_sums))
@@ -217,7 +190,6 @@ def build_fixtures(model: ChessNet) -> tuple[dict, np.ndarray]:
         fx = build_fixture(model, name, start_fen, moves)
         fixtures.append(fx)
         if sample_tensor is None:
-            # Re-derive the startpos tensor for ONNX validation.
             b = chess.Board(start_fen)
             states = [b.copy()]
             for uci in moves:
@@ -240,7 +212,6 @@ def build_fixtures(model: ChessNet) -> tuple[dict, np.ndarray]:
     return doc, sample_tensor
 
 
-# --- Main -------------------------------------------------------------------
 def main() -> None:
     os.makedirs(OUT_DIR, exist_ok=True)
 
@@ -279,7 +250,6 @@ def main() -> None:
         json.dump(metadata, f, indent=2)
     print(f"[metadata] -> {METADATA}")
 
-    # Clean up the intermediate fp32 file when a distinct quantized model shipped.
     if quant_tag == "int8" and os.path.exists(ONNX_FP32):
         os.remove(ONNX_FP32)
 

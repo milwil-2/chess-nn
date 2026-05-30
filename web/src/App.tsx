@@ -1,5 +1,5 @@
-// Page shell: nav → hero → Play & Compare → Architecture → Journey →
-// Improvements → Strength → Roadmap → footer.
+// Page shell: nav, hero, Play & Compare, Architecture, Versions,
+// Improvements, Strength, Roadmap, footer.
 import EngineBoard from "./components/EngineBoard";
 import Architecture from "./components/Architecture";
 import Journey from "./components/Journey";
@@ -19,7 +19,7 @@ export default function App() {
           <div className="nav-links">
             <a href="#play">Play</a>
             <a href="#architecture">Architecture</a>
-            <a href="#journey">Journey</a>
+            <a href="#journey">Versions</a>
             <a href="#improvements">Improvements</a>
             <a href="#strength">Strength</a>
             <a href="#roadmap">Roadmap</a>
@@ -28,19 +28,18 @@ export default function App() {
       </nav>
 
       {/* Hero */}
-      <section className="hero hero-grid">
+      <section className="hero">
         <div className="wrap">
-          <span className="kicker">An AlphaZero-style engine, built from scratch</span>
+          <span className="kicker">AlphaZero-style chess engine</span>
           <h1>
-            A homemade chess brain you can <span className="accent">play against</span> — and
-            second-guess.
+            chess-nn — an AlphaZero-style chess engine, built from <span className="accent">scratch</span>.
           </h1>
           <p className="lead">
-            A self-trained policy/value network and Monte-Carlo Tree Search, written from scratch in
-            PyTorch. Load a position, play Stockfish at any strength, and watch my network's move
-            picks sit side-by-side with Stockfish's — no search, just the raw neural net thinking
-            out loud. Training has been limited by the compute I had access to, so it's still a
-            modest player — the point here is the build, not the rating.
+            A self-trained convolutional policy/value network driven by Monte-Carlo Tree Search,
+            written from scratch in PyTorch. Play Stockfish at a selectable Elo in the browser; on
+            every move the network's top picks (raw policy, no search) are shown next to
+            Stockfish's analysis. Training has been bounded by available compute (limited GPU time
+            and dataset size on rented hardware), so the current network is still a modest player.
           </p>
 
           <div className="hero-stats">
@@ -78,10 +77,10 @@ export default function App() {
         <div className="wrap">
           <div className="section-head">
             <span className="kicker">Play &amp; compare</span>
-            <h2 className="section-title">You vs Stockfish — with a backseat driver</h2>
+            <h2 className="section-title">Play &amp; compare</h2>
             <p className="section-sub">
-              Drag a piece to move. Stockfish replies at your chosen Elo. After every move, my
-              network's top pick (green) and Stockfish's best (blue) are drawn right on the board,
+              Drag a piece to move. Stockfish replies at the chosen Elo. After every move, the
+              network's top pick (green) and Stockfish's best move (blue) are drawn on the board,
               with the full breakdown on the right.
             </p>
           </div>
@@ -98,10 +97,10 @@ export default function App() {
       <footer className="footer">
         <div className="wrap footer-inner">
           <div className="muted">
-            chess-nn — a from-scratch AlphaZero-style chess engine in PyTorch.
+            chess-nn — an AlphaZero-style chess engine in PyTorch.
           </div>
           <div className="mono">
-            net = raw policy · Stockfish 16 NNUE · runs fully client-side
+            net = raw policy · Stockfish 16 NNUE · runs client-side
           </div>
         </div>
       </footer>

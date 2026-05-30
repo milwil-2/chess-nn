@@ -1,5 +1,6 @@
-// Journey section — the v1 → v3 evolution, framed around the recurring symptom
-// (visibly weak moves: early king walks, hung pieces) that drove each change.
+// Version history — v1 to v3 (plus a pre-history prototype). Each variant
+// targets the recurring symptom: the network played visibly weak moves
+// (early king walks, hung pieces).
 interface Stage {
   ver: string;
   where: string;
@@ -13,31 +14,31 @@ const STAGES: Stage[] = [
   {
     ver: "v1_history8",
     where: "local · M3 Mac",
-    title: "First model with 8-frame history",
-    body: "The first real network: a 10-block SE-residual tower with a WDL value head, fed eight frames of board history so it could see piece trajectories. Trained on filtered Lichess games (rating ≥ 2000) right on a laptop GPU.",
+    title: "First 8-frame-history model",
+    body: "A 10-block SE-residual tower with a WDL value head, fed 8 frames of board history so it could see piece trajectories. Trained on filtered Lichess games (rating ≥ 2000) on a laptop GPU.",
     tags: ["8-frame history", "SE blocks", "WDL head", "MIN_RATING 2000"],
   },
   {
     ver: "v1_history8_vast",
     where: "cloud GPU",
-    title: "Ported to the cloud",
-    body: "Same architecture, moved onto a rented Vast.ai GPU so training wasn't bottlenecked by the Mac. Bigger batches and a scaled learning rate — faster iteration, same brain.",
+    title: "Ported to cloud GPU",
+    body: "Same architecture, moved onto a rented Vast.ai GPU so training was no longer bottlenecked by the Mac. Larger batches and a linearly scaled learning rate.",
     tags: ["Vast.ai GPU", "larger batch", "LR scaling"],
   },
   {
     ver: "v2_vast",
     where: "cloud GPU",
-    title: "More context, bigger batches",
-    body: "Metadata grew from 6 to 9 planes (added side-to-move and two repetition flags → 105 input planes). Large-batch training and a rebalanced value loss. Stronger, but still played the odd embarrassing move.",
+    title: "Expanded metadata, larger batches",
+    body: "Metadata grew from 6 to 9 planes (added side-to-move and two repetition flags, for 105 input planes total). Large-batch training and a rebalanced value loss. Stronger than v1, but still played occasional clearly bad moves.",
     tags: ["105 planes", "batch 2048", "value-loss rebalance"],
   },
   {
     ver: "v3_vast",
     where: "cloud GPU",
     star: true,
-    title: "Current best — supervision + tactics",
-    body: "The push to kill the weak moves: a Stockfish auxiliary loss grounds the policy on engine-quality targets, tactical positions are oversampled 3×, the rating floor is 1800, and a suite of inference-time search helpers backs the engine at play time.",
-    tags: ["Stockfish supervision", "tactical 3× oversample", "search helpers", "MIN_RATING 1800"],
+    title: "Current best — Stockfish supervision + tactical oversampling",
+    body: "Adds a Stockfish auxiliary policy loss (depth-12 best move on 20% of positions), 3x oversampling of tactical positions (hanging piece or fork), MIN_RATING raised to 1800, and a set of inference-time search helpers used only at play time.",
+    tags: ["Stockfish supervision", "tactical 3x oversample", "search helpers", "MIN_RATING 1800"],
   },
 ];
 
@@ -46,12 +47,13 @@ export default function Journey() {
     <section id="journey" className="section">
       <div className="wrap">
         <div className="section-head">
-          <span className="kicker">The journey</span>
-          <h2 className="section-title">Four versions, one stubborn symptom</h2>
+          <span className="kicker">Versions</span>
+          <h2 className="section-title">Versions</h2>
           <p className="section-sub">
-            Every version targeted the same problem: the network kept making moves a club player
-            would never make — walking the king out early, leaving pieces hanging. Each iteration
-            chipped away at it from a different angle.
+            Four trained variants (plus a pre-history prototype). Each <code>models/&lt;variant&gt;/</code>
+            directory is a self-contained snapshot of the template codebase at creation time, so
+            older variants stay runnable as fixed baselines. The progression was driven by a
+            recurring symptom — the model played visibly weak moves (early king walks, hung pieces).
           </p>
         </div>
 

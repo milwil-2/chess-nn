@@ -1,17 +1,8 @@
-// =====================================================================
-// Policy + value post-processing — TypeScript port of
-//   models/v3_vast/chess_nn/move_encoding.py :: policy_to_moves
-//   models/v3_vast/chess_nn/model.py        :: wdl_to_scalar
-//
-// Given raw policy logits (4672) and value logits (3) plus the current
-// position, mask illegal moves, softmax over the legal set, and return the
-// top moves sorted by probability, together with the WDL distribution.
-// =====================================================================
+// Port of models/v3_vast/chess_nn :: policy_to_moves + wdl_to_scalar.
 import type { Chess } from "chess.js";
 import type { MoveSuggestion, NetResult } from "./types";
 import { legalMoveEntries } from "./moveEncoding";
 
-/** Softmax of WDL value logits [win, draw, loss]. */
 export function softmax3(
   logits: ArrayLike<number>
 ): [number, number, number] {
@@ -23,14 +14,6 @@ export function softmax3(
   return [e0 / sum, e1 / sum, e2 / sum];
 }
 
-/**
- * Build a NetResult from raw network outputs.
- *
- * @param policy logits, length 4672
- * @param value  WDL logits, length 3 ([win, draw, loss] from side-to-move POV)
- * @param chess  current position (used for legal masking + SAN)
- * @param topK   number of suggestions to return (default 10)
- */
 export function buildNetResult(
   policy: ArrayLike<number>,
   value: ArrayLike<number>,
@@ -45,8 +28,7 @@ export function buildNetResult(
     return { topMoves: [], wdl, scalar };
   }
 
-  // Masked softmax over legal move indices only (mirrors policy_to_moves:
-  // subtract the max legal logit, exp, normalize by the legal-set sum).
+  // Masked softmax over legal move indices only (mirrors policy_to_moves).
   let maxLogit = -Infinity;
   for (const e of legal) {
     const v = policy[e.index];

@@ -1,7 +1,7 @@
-// Side-by-side recommendation panel:
-//  left  = chess-nn raw policy (top-3 + WDL bar) — honestly labeled "no search"
-//  right = Stockfish @ full strength (best move + eval)
-// Highlights agreement when both pick the same move.
+// Side-by-side panel:
+//  left  = chess-nn raw policy (top-3 + WDL bar), labeled "no search"
+//  right = Stockfish at full strength (best move + eval)
+// Highlights when both engines pick the same move.
 import type { NetResult, SfAnalysis } from "../engine/types";
 
 interface ComparisonPanelProps {
@@ -62,12 +62,12 @@ export default function ComparisonPanel({
       {active && (netBest || sfBest) ? (
         agree ? (
           <div className="agree-banner">
-            <span>◆</span> Net and Stockfish agree on{" "}
+            <span>◆</span> Net and Stockfish picked the same move:{" "}
             <strong>{sf?.best.san ?? netTop[0]?.san}</strong>
           </div>
         ) : (
           <div className="agree-banner disagree-banner">
-            <span>◇</span> Net and Stockfish prefer different moves
+            <span>◇</span> Net and Stockfish picked different moves
           </div>
         )
       ) : null}
@@ -76,20 +76,20 @@ export default function ComparisonPanel({
         {/* ---- NET ---- */}
         <div className="cmp-card net">
           <div className="cmp-title">
-            <span className="swatch net" /> Your net
+            <span className="swatch net" /> chess-nn
           </div>
-          <div className="cmp-sub">raw policy — no search</div>
+          <div className="cmp-sub">raw policy, no search</div>
 
           {!netReady ? (
             <div className="empty-hint">
-              Net model not loaded in this build.
+              Network not loaded in this build.
               <br />
               <span className="muted-note">
-                The ONNX policy/value net wires in here when its bundle ships.
+                The ONNX policy/value network wires in here once its bundle ships.
               </span>
             </div>
           ) : !active ? (
-            <div className="empty-hint">Make a move to see the net's policy.</div>
+            <div className="empty-hint">Make a move to see the network's policy.</div>
           ) : netLoading && !netResult ? (
             <SkeletonRows n={3} />
           ) : netTop.length === 0 ? (
@@ -136,7 +136,7 @@ export default function ComparisonPanel({
           <div className="cmp-title">
             <span className="swatch sf" /> Stockfish
           </div>
-          <div className="cmp-sub">full strength · reference</div>
+          <div className="cmp-sub">full strength reference</div>
 
           {!active ? (
             <div className="empty-hint">Make a move to request analysis.</div>
@@ -165,8 +165,8 @@ export default function ComparisonPanel({
       </div>
 
       <p className="muted-note">
-        The net shows its <strong>raw move probabilities</strong> with no tree search — it is a
-        single forward pass. Stockfish runs a full search to fixed depth as a calibrated reference.
+        The network shows its <strong>raw move probabilities</strong> from a single forward pass,
+        with no tree search. Stockfish runs a full search to fixed depth as a calibrated reference.
       </p>
     </div>
   );
