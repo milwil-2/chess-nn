@@ -1,8 +1,23 @@
 // Side-by-side panel:
 //  left  = chess-nn raw policy (top-3 + WDL bar), labeled "no search"
 //  right = Stockfish at full strength (best move + eval)
-// Highlights when both engines pick the same move.
+// The banner above the cards quantifies how much weaker the network's pick is
+// when the two disagree; it's also given more visual weight while autoplay is
+// driving the pace.
 import type { NetResult, SfAnalysis } from "../engine/types";
+
+/** Comparison of the network's top move against Stockfish's best, for the
+ *  current position. cpLoss is non-negative and only set when both sides have
+ *  centipawn scores. mateNote replaces the number when mate is involved. */
+export interface Deviation {
+  agree: boolean;
+  netUci: string;
+  netSan: string;
+  sfUci: string;
+  sfSan: string;
+  cpLoss: number | null;
+  mateNote: string | null;
+}
 
 interface ComparisonPanelProps {
   netResult: NetResult | null;
@@ -12,6 +27,10 @@ interface ComparisonPanelProps {
   sfLoading: boolean;
   /** true when it's the human's turn / a position to think about exists. */
   active: boolean;
+  deviation: Deviation | null;
+  autoplay: boolean;
+  autoplayDelayMs: number;
+  driftLog: { cpLoss: number }[];
 }
 
 function formatEval(sf: SfAnalysis): { big: string; unit: string } {
@@ -36,6 +55,52 @@ function SkeletonRows({ n }: { n: number }) {
   );
 }
 
+function formatCp(cp: number): string {
+  // Anything inside ~5 cp is noise at MultiPV/movetime; call it equal.
+  if (cp < 5) return "≈ same eval";
+  if (cp < 100) return `−${(cp / 100).toFixed(2)} pawns`;
+  return `−${cp} cp`;
+}
+
+function DeviationBanner({
+  deviation,
+  autoplay,
+  autoplayDelayMs,
+}: {
+  deviation: Deviation;
+  autoplay: boolean;
+  autoplayDelayMs: number;
+}) {
+  if (deviation.agree) {
+    return (
+      <div className={`agree-banner${autoplay ? " autoplay" : ""}`}>
+        <span>◆</span> Network and Stockfish picked the same move:{" "}
+        <strong>{deviation.netSan}</strong>
+      </div>
+    );
+  }
+
+  const lossText = deviation.mateNote
+    ? deviation.mateNote
+    : deviation.cpLoss !== null
+      ? formatCp(deviation.cpLoss)
+      : "—";
+  return (
+    <div className={`agree-banner disagree-banner${autoplay ? " autoplay" : ""}`}>
+      <span>◇</span> Network plays <strong>{deviation.netSan}</strong>, Stockfish prefers{" "}
+      <strong>{deviation.sfSan}</strong>
+      <span className="cp-loss"> · {lossText}</span>
+      {autoplay && (
+        <span
+          className="countdown"
+          style={{ animationDuration: `${autoplayDelayMs}ms` }}
+          aria-hidden
+        />
+      )}
+    </div>
+  );
+}
+
 export default function ComparisonPanel({
   netResult,
   netLoading,
@@ -43,13 +108,13 @@ export default function ComparisonPanel({
   sf,
   sfLoading,
   active,
+  deviation,
+  autoplay,
+  autoplayDelayMs,
+  driftLog,
 }: ComparisonPanelProps) {
   const netTop = netResult?.topMoves.slice(0, 3) ?? [];
   const maxProb = netTop.length ? Math.max(...netTop.map((m) => m.prob ?? 0)) : 1;
-
-  const netBest = netTop[0]?.uci;
-  const sfBest = sf?.best.uci;
-  const agree = !!netBest && !!sfBest && netBest === sfBest;
 
   const wdl = netResult?.wdl ?? [0, 0, 0];
   const wdlSum = wdl[0] + wdl[1] + wdl[2] || 1;
@@ -57,23 +122,20 @@ export default function ComparisonPanel({
   const dPct = (wdl[1] / wdlSum) * 100;
   const lPct = (wdl[2] / wdlSum) * 100;
 
+  const driftSum = driftLog.reduce((s, d) => s + d.cpLoss, 0);
+  const driftCount = driftLog.length;
+
   return (
     <div className="compare">
-      {active && (netBest || sfBest) ? (
-        agree ? (
-          <div className="agree-banner">
-            <span>◆</span> Net and Stockfish picked the same move:{" "}
-            <strong>{sf?.best.san ?? netTop[0]?.san}</strong>
-          </div>
-        ) : (
-          <div className="agree-banner disagree-banner">
-            <span>◇</span> Net and Stockfish picked different moves
-          </div>
-        )
+      {active && deviation ? (
+        <DeviationBanner
+          deviation={deviation}
+          autoplay={autoplay}
+          autoplayDelayMs={autoplayDelayMs}
+        />
       ) : null}
 
       <div className="compare-grid">
-        {/* ---- NET ---- */}
         <div className="cmp-card net">
           <div className="cmp-title">
             <span className="swatch net" /> chess-nn
@@ -127,11 +189,16 @@ export default function ComparisonPanel({
                   </span>
                 </div>
               </div>
+              {driftCount > 0 && (
+                <div className="drift-line">
+                  Net drift: <strong>−{(driftSum / 100).toFixed(2)} pawns</strong> across{" "}
+                  {driftCount} {driftCount === 1 ? "move" : "moves"}
+                </div>
+              )}
             </>
           )}
         </div>
 
-        {/* ---- STOCKFISH ---- */}
         <div className="cmp-card sf">
           <div className="cmp-title">
             <span className="swatch sf" /> Stockfish

@@ -618,6 +618,53 @@ code,
   background: #0c0c14;
   color: var(--muted);
 }
+.disagree-banner strong {
+  color: var(--text);
+}
+.agree-banner .cp-loss {
+  color: var(--warn);
+  font-weight: 600;
+}
+/* Bumped weight + room for the countdown bar when autoplay is driving. */
+.agree-banner.autoplay {
+  position: relative;
+  font-size: 14px;
+  padding: 13px 16px 15px;
+  border-width: 2px;
+  overflow: hidden;
+}
+.disagree-banner.autoplay {
+  border-color: var(--warn);
+  background: #1a140c;
+  color: var(--text);
+}
+.agree-banner .countdown {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 3px;
+  width: 100%;
+  background: var(--accent-2);
+  transform-origin: left center;
+  animation: countdown-shrink linear forwards;
+}
+.disagree-banner.autoplay .countdown {
+  background: var(--warn);
+}
+@keyframes countdown-shrink {
+  from { transform: scaleX(1); }
+  to   { transform: scaleX(0); }
+}
+.drift-line {
+  margin-top: 10px;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--muted);
+}
+.drift-line strong {
+  color: var(--warn);
+  font-weight: 600;
+}
 .skeleton {
   background: linear-gradient(90deg, #15151f 25%, #1c1c2a 37%, #15151f 63%);
   background-size: 400% 100%;

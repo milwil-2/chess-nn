@@ -2,7 +2,13 @@
 // runs WITHOUT COOP/COEP headers, so it works on a plain static host. Assets
 // (worker .js, .wasm, NNUE) ship together in public/stockfish/.
 import { Chess } from "chess.js";
-import type { MoveSuggestion, SfAnalysis, StockfishEngine } from "./types";
+import type { MoveSuggestion, SfAnalysis, SfLine, StockfishEngine } from "./types";
+
+/** Number of principal variations the analyst keeps; used to look up the net's
+ *  move score without a second `searchmoves` call (that variant hangs in this
+ *  WASM SF build). Higher = more disagreements get a real cp number, but each
+ *  PV gets less CPU at a given movetime. */
+const ANALYST_MULTIPV = 3;
 
 /** SF16 honours UCI_Elo in this band. Below the floor we fall back to Skill Level. */
 const UCI_ELO_MIN = 1320;
@@ -78,6 +84,7 @@ export function createStockfish(): StockfishEngine {
       // filename matches our public/stockfish/ layout.
       post("setoption name EvalFile value nn-5af11540bbfe.nnue");
       post("setoption name Use NNUE value true");
+      post(`setoption name MultiPV value ${ANALYST_MULTIPV}`);
       await send("isready", (l) => (l.startsWith("readyok") ? true : undefined));
     })();
     return bootPromise;
@@ -127,35 +134,42 @@ export function createStockfish(): StockfishEngine {
     });
   }
 
-  async function analyze(fen: string, opts?: { depth?: number }): Promise<SfAnalysis> {
+  async function analyze(
+    fen: string,
+    opts?: { depth?: number; movetimeMs?: number },
+  ): Promise<SfAnalysis> {
     await boot();
-    const depth = opts?.depth ?? 15;
+    // Prefer movetime when given — single-threaded WASM SF can take a long
+    // time to reach a given depth on complex positions, and a hard time
+    // bound keeps the panel snappy.
+    const goCmd = opts?.movetimeMs !== undefined
+      ? `go movetime ${opts.movetimeMs}`
+      : `go depth ${opts?.depth ?? 15}`;
     return enqueue(async () => {
-      let scoreCp: number | null = null;
-      let mate: number | null = null;
+      // MultiPV: SF emits one info line per slot per depth iteration. We keep
+      // the most-recent line for each slot, which is from the deepest finished
+      // (or in-progress) iteration when bestmove arrives.
+      type Slot = { scoreCp: number | null; mate: number | null; pv: string[] };
+      const slots = new Map<number, Slot>();
       let reachedDepth = 0;
-      let pv: string[] = [];
 
       const bestUci = await send<string>(
-        [`position fen ${fen}`, `go depth ${depth}`],
+        [`position fen ${fen}`, goCmd],
         (line) => {
           if (line.startsWith("info") && line.includes(" pv ")) {
             const depthMatch = line.match(/\bdepth (\d+)/);
             const d = depthMatch ? Number(depthMatch[1]) : 0;
-            if (d >= reachedDepth) {
-              reachedDepth = d;
-              const cpMatch = line.match(/score cp (-?\d+)/);
-              const mateMatch = line.match(/score mate (-?\d+)/);
-              if (mateMatch) {
-                mate = Number(mateMatch[1]);
-                scoreCp = null;
-              } else if (cpMatch) {
-                scoreCp = Number(cpMatch[1]);
-                mate = null;
-              }
-              const pvMatch = line.match(/ pv (.+)$/);
-              pv = pvMatch ? pvMatch[1].trim().split(/\s+/) : pv;
-            }
+            if (d > reachedDepth) reachedDepth = d;
+            const mpvMatch = line.match(/\bmultipv (\d+)/);
+            const mpv = mpvMatch ? Number(mpvMatch[1]) : 1;
+            const cpMatch = line.match(/score cp (-?\d+)/);
+            const mateMatch = line.match(/score mate (-?\d+)/);
+            const pvMatch = line.match(/ pv (.+)$/);
+            slots.set(mpv, {
+              scoreCp: mateMatch ? null : cpMatch ? Number(cpMatch[1]) : null,
+              mate: mateMatch ? Number(mateMatch[1]) : null,
+              pv: pvMatch ? pvMatch[1].trim().split(/\s+/) : [],
+            });
           }
           if (line.startsWith("bestmove")) {
             return line.split(/\s+/)[1] ?? "";
@@ -164,12 +178,32 @@ export function createStockfish(): StockfishEngine {
         },
       );
 
-      const best: MoveSuggestion = { uci: bestUci, san: uciToSan(fen, bestUci) };
-      if (pv.length && pv[0] !== bestUci) {
-        best.uci = pv[0];
-        best.san = uciToSan(fen, pv[0]);
-      }
-      return { best, scoreCp, mate, depth: reachedDepth, pv };
+      const alternatives: SfLine[] = [...slots.keys()]
+        .sort((a, b) => a - b)
+        .map((k) => {
+          const s = slots.get(k)!;
+          const uci = s.pv[0] ?? "";
+          return {
+            uci,
+            san: uciToSan(fen, uci),
+            scoreCp: s.scoreCp,
+            mate: s.mate,
+            pv: s.pv,
+          };
+        });
+
+      const top = alternatives[0];
+      const best: MoveSuggestion = top
+        ? { uci: top.uci, san: top.san }
+        : { uci: bestUci, san: uciToSan(fen, bestUci) };
+      return {
+        best,
+        scoreCp: top?.scoreCp ?? null,
+        mate: top?.mate ?? null,
+        depth: reachedDepth,
+        pv: top?.pv ?? [],
+        alternatives,
+      };
     });
   }
 

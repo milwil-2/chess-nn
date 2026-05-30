@@ -8,12 +8,18 @@ import { Chess, validateFen } from "chess.js";
 import { createStockfish } from "../engine/stockfish";
 import { createNetEngine } from "../engine/net";
 import type { NetResult, SfAnalysis } from "../engine/types";
+import type { Deviation } from "./ComparisonPanel";
 import ComparisonPanel from "./ComparisonPanel";
 import EvalBar from "./EvalBar";
 
 const START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 const ELO_PRESETS = [1350, 1500, 1800, 2200, 2800];
-const ANALYSIS_DEPTH = 15;
+// Single-threaded WASM SF reaches its depth at very different speeds across
+// positions, so the analyst is bounded by movetime — keeps the panel snappy
+// and stops autoplay from stalling when SF chains into a complex middlegame.
+// 1500ms reaches roughly depth 12-15 on opening positions with MultiPV=3.
+const ANALYSIS_MOVETIME_MS = 1500;
+const AUTOPLAY_DELAY_MS = 1800;
 const NET_ACCENT = "#7ecfa0"; // var(--accent)
 const SF_ACCENT = "#6aa0ff"; // var(--accent-2)
 
@@ -66,6 +72,9 @@ export default function EngineBoard() {
   const [netResult, setNetResult] = useState<NetResult | null>(null);
   const [netLoading, setNetLoading] = useState(false);
   const [netReady, setNetReady] = useState(false);
+  const [deviation, setDeviation] = useState<Deviation | null>(null);
+  const [autoplay, setAutoplay] = useState(false);
+  const [driftLog, setDriftLog] = useState<{ cpLoss: number }[]>([]);
 
   const game = useMemo(() => gameFrom(startFen, moves) ?? new Chess(startFen), [startFen, moves]);
   const fen = game.fen();
@@ -144,7 +153,7 @@ export default function EngineBoard() {
     setSf(null);
     setEngineBooting(true);
     analystRef.current
-      .analyze(currentFen, { depth: ANALYSIS_DEPTH })
+      .analyze(currentFen, { movetimeMs: ANALYSIS_MOVETIME_MS })
       .then((res) => {
         if (analysisToken.current === token) {
           setSf(res);
@@ -159,6 +168,40 @@ export default function EngineBoard() {
         }
       });
   }, [fen, startFen, moves, isGameOver, netReady]);
+
+  // Deviation: once sf and netResult have landed for the current position,
+  // look up the net's top move in Stockfish's MultiPV alternatives. If it's in
+  // the top-N lines we get a real cp loss; if not, the net's pick is "outside
+  // Stockfish's top N" and we render that instead of a number. All synchronous
+  // — no second SF call (the `searchmoves` variant hangs in this WASM build).
+  useEffect(() => {
+    if (!sf || !netResult || netResult.topMoves.length === 0 || isGameOver) {
+      setDeviation(null);
+      return;
+    }
+    const netUci = netResult.topMoves[0].uci;
+    const sfUci = sf.best.uci;
+    const netSan = netResult.topMoves[0].san;
+    const sfSan = sf.best.san;
+    if (netUci === sfUci) {
+      setDeviation({ agree: true, netUci, netSan, sfUci, sfSan, cpLoss: 0, mateNote: null });
+      return;
+    }
+    const altMatch = sf.alternatives.find((a) => a.uci === netUci);
+    let cpLoss: number | null = null;
+    let mateNote: string | null = null;
+    if (sf.mate !== null) {
+      const n = Math.abs(sf.mate);
+      mateNote = sf.mate > 0 ? `net misses mate-in-${n}` : `net is already in mate-in-${n}`;
+    } else if (!altMatch) {
+      mateNote = `outside Stockfish's top ${sf.alternatives.length} lines`;
+    } else if (altMatch.mate !== null && altMatch.mate < 0) {
+      mateNote = `net's move walks into mate-in-${Math.abs(altMatch.mate)}`;
+    } else if (sf.scoreCp !== null && altMatch.scoreCp !== null) {
+      cpLoss = Math.max(0, sf.scoreCp - altMatch.scoreCp);
+    }
+    setDeviation({ agree: false, netUci, netSan, sfUci, sfSan, cpLoss, mateNote });
+  }, [sf, netResult, isGameOver]);
 
   const replyToken = useRef(0);
   useEffect(() => {
@@ -200,6 +243,55 @@ export default function EngineBoard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fen, humanTurn, isGameOver]);
 
+  // Autoplay loop: when on and it's the human-side's turn, wait for analysis +
+  // deviation to settle, pause AUTOPLAY_DELAY_MS so the visitor can read the
+  // banner, then commit the net's top move. Cancelling on any dep change
+  // (toggle off, position change, autoplay flip) clears the pending timer.
+  useEffect(() => {
+    if (!autoplay) return;
+    if (isGameOver || !humanTurn || opponentThinking) return;
+    if (!netResult || netResult.topMoves.length === 0) return;
+    if (!sf || sfLoading || netLoading) return;
+
+    const netUci = netResult.topMoves[0].uci;
+    const movesAtRequest = moves;
+    const driftEntry = { cpLoss: deviation?.cpLoss ?? 0 };
+
+    const timer = setTimeout(() => {
+      const check = gameFrom(startFen, movesAtRequest);
+      if (!check) {
+        setAutoplay(false);
+        return;
+      }
+      try {
+        check.move({
+          from: netUci.slice(0, 2),
+          to: netUci.slice(2, 4),
+          promotion: netUci.length > 4 ? netUci[4] : undefined,
+        });
+      } catch {
+        setAutoplay(false);
+        return;
+      }
+      setMoves((prev) => (prev === movesAtRequest ? [...prev, netUci] : prev));
+      setDriftLog((prev) => [...prev, driftEntry]);
+    }, AUTOPLAY_DELAY_MS);
+
+    return () => clearTimeout(timer);
+  }, [
+    autoplay,
+    humanTurn,
+    isGameOver,
+    opponentThinking,
+    netResult,
+    sf,
+    sfLoading,
+    netLoading,
+    deviation,
+    moves,
+    startFen,
+  ]);
+
   const onPieceDrop = useCallback(
     ({ sourceSquare, targetSquare }: PieceDropHandlerArgs): boolean => {
       if (!targetSquare) return false;
@@ -237,6 +329,8 @@ export default function EngineBoard() {
     setMoves([]);
     setSf(null);
     setNetResult(null);
+    setDeviation(null);
+    setDriftLog([]);
   }, []);
 
   const loadFen = useCallback(() => {
@@ -253,6 +347,8 @@ export default function EngineBoard() {
     setMoves([]);
     setSf(null);
     setNetResult(null);
+    setDeviation(null);
+    setDriftLog([]);
     const stm: Color = trimmed.split(/\s+/)[1] === "b" ? "black" : "white";
     setHumanColor(stm);
     setOrientation(stm);
@@ -334,7 +430,7 @@ export default function EngineBoard() {
     boardOrientation: orientation,
     onPieceDrop,
     arrows,
-    allowDragging: humanTurn && !opponentThinking,
+    allowDragging: humanTurn && !opponentThinking && !autoplay,
     id: "engine-board",
     darkSquareStyle: { backgroundColor: "#2a2a3c" },
     lightSquareStyle: { backgroundColor: "#3d3d52" },
@@ -443,6 +539,14 @@ export default function EngineBoard() {
                 />
                 show hint arrows
               </label>
+              <label className="toggle">
+                <input
+                  type="checkbox"
+                  checked={autoplay}
+                  onChange={(e) => setAutoplay(e.target.checked)}
+                />
+                autoplay (chess-nn plays)
+              </label>
             </div>
 
             <div className="controls-row">
@@ -468,6 +572,10 @@ export default function EngineBoard() {
           sf={sf}
           sfLoading={sfLoading}
           active={!isGameOver}
+          deviation={deviation}
+          autoplay={autoplay}
+          autoplayDelayMs={AUTOPLAY_DELAY_MS}
+          driftLog={driftLog}
         />
       </div>
     </div>
