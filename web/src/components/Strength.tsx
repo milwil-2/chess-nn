@@ -57,7 +57,7 @@ export default function Strength() {
           <span className="kicker">
             <span className="sec-idx">04</span>Strength
           </span>
-          <h2 className="section-title">Gauntlet results</h2>
+          <h2 className="section-title">Estimated Elo results</h2>
           <p className="section-sub">
             Current v3_vast strength is roughly 700 Elo on the local Stockfish gauntlet: weak,
             which is what the next training cycle aims to fix. This is a{" "}
