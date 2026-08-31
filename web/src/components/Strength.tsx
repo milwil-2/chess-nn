@@ -1,4 +1,4 @@
-// Strength — single-day gauntlet snapshot with CI error bars. Not a
+// Strength: single-day gauntlet snapshot with CI error bars. Not a
 // training curve.
 import eloData from "../data/elo.json";
 
@@ -54,10 +54,12 @@ export default function Strength() {
     <section id="strength" className="section">
       <div className="wrap">
         <div className="section-head">
-          <span className="kicker">Strength</span>
-          <h2 className="section-title">Strength</h2>
+          <span className="kicker">
+            <span className="sec-idx">04</span>Strength
+          </span>
+          <h2 className="section-title">Gauntlet results</h2>
           <p className="section-sub">
-            Current v3_vast strength is roughly ~700 Elo on the local Stockfish gauntlet — weak,
+            Current v3_vast strength is roughly 700 Elo on the local Stockfish gauntlet: weak,
             which is what the next training cycle aims to fix. This is a{" "}
             <strong>single gauntlet snapshot</strong> against Stockfish on one day with wide
             confidence intervals, not a training curve. The estimate lands around 700–870 Elo for
@@ -66,7 +68,7 @@ export default function Strength() {
           </p>
         </div>
 
-        <div className="panel panel-pad">
+        <div className="strength-chart">
           <span className="field-label">v3_vast vs Stockfish · 2026-05-26 · checkpoint daf568…</span>
           <div className="strength-rows" style={{ marginTop: 14 }}>
             {headline.map((r) => (
@@ -89,7 +91,7 @@ export default function Strength() {
 
           <p className="caption">
             Blue points are the full engine (MCTS + inference helpers); green points are per-level
-            sweeps. The whiskers are 95% confidence intervals — wide because each data point is
+            sweeps. The whiskers are 95% confidence intervals, wide because each data point is
             only a handful of games. The network used in the browser above is{" "}
             <strong>raw policy with no search</strong>, so it plays noticeably weaker than these
             gauntlet numbers.

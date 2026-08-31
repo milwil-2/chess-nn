@@ -16,6 +16,8 @@
     "export-model": "echo 'run web/scripts/export_onnx.py with the torch venv — see web/README.md'"
   },
   "dependencies": {
+    "@fontsource-variable/jetbrains-mono": "^5.3.0",
+    "@fontsource/spectral": "^5.3.0",
     "chess.js": "^1.4.0",
     "onnxruntime-web": "^1.26.0",
     "react": "^19.0.0",

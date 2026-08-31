@@ -42,7 +42,7 @@ function formatEval(sf: SfAnalysis): { big: string; unit: string } {
     const sign = pawns > 0 ? "+" : "";
     return { big: `${sign}${pawns.toFixed(2)}`, unit: "pawns (stm)" };
   }
-  return { big: "—", unit: "" };
+  return { big: "–", unit: "" };
 }
 
 function SkeletonRows({ n }: { n: number }) {
@@ -74,7 +74,7 @@ function DeviationBanner({
   if (deviation.agree) {
     return (
       <div className={`agree-banner${autoplay ? " autoplay" : ""}`}>
-        <span>◆</span> Network and Stockfish picked the same move:{" "}
+        <span className="banner-mark" aria-hidden /> Network and Stockfish picked the same move:{" "}
         <strong>{deviation.netSan}</strong>
       </div>
     );
@@ -84,10 +84,10 @@ function DeviationBanner({
     ? deviation.mateNote
     : deviation.cpLoss !== null
       ? formatCp(deviation.cpLoss)
-      : "—";
+      : "–";
   return (
     <div className={`agree-banner disagree-banner${autoplay ? " autoplay" : ""}`}>
-      <span>◇</span> Network plays <strong>{deviation.netSan}</strong>, Stockfish prefers{" "}
+      <span className="banner-mark" aria-hidden /> Network plays <strong>{deviation.netSan}</strong>, Stockfish prefers{" "}
       <strong>{deviation.sfSan}</strong>
       <span className="cp-loss"> · {lossText}</span>
       {autoplay && (
@@ -176,7 +176,7 @@ export default function ComparisonPanel({
                 })}
               </div>
               <div className="wdl">
-                <span className="field-label">value head — win / draw / loss (stm)</span>
+                <span className="field-label">value head · win / draw / loss (stm)</span>
                 <div className="wdl-bar">
                   <span className="wdl-seg win" style={{ width: `${wPct}%` }}>
                     {wPct > 14 ? `${Math.round(wPct)}` : ""}
@@ -220,7 +220,7 @@ export default function ComparisonPanel({
               <span className="field-label" style={{ marginTop: 12, display: "block" }}>
                 best move · depth {sf.depth}
               </span>
-              <div className="cmp-best">{sf.best.san || sf.best.uci || "—"}</div>
+              <div className="cmp-best">{sf.best.san || sf.best.uci || "–"}</div>
               {sf.pv.length > 1 && (
                 <div className="cmp-pv">
                   pv&nbsp;&nbsp;{sf.pv.slice(0, 8).join("  ")}

@@ -1,11 +1,9 @@
-// Page shell: nav, hero, Play & Compare, Architecture, Versions,
-// Improvements, Strength, Roadmap, footer.
+// Page shell: nav, hero, Play & Compare, Architecture,
+// Improvements, Strength, footer.
 import EngineBoard from "./components/EngineBoard";
 import Architecture from "./components/Architecture";
-import Journey from "./components/Journey";
 import Improvements from "./components/Improvements";
 import Strength from "./components/Strength";
-import Roadmap from "./components/Roadmap";
 
 export default function App() {
   return (
@@ -19,10 +17,8 @@ export default function App() {
           <div className="nav-links">
             <a href="#play">Play</a>
             <a href="#architecture">Architecture</a>
-            <a href="#journey">Versions</a>
             <a href="#improvements">Improvements</a>
             <a href="#strength">Strength</a>
-            <a href="#roadmap">Roadmap</a>
           </div>
         </div>
       </nav>
@@ -30,16 +26,14 @@ export default function App() {
       {/* Hero */}
       <section className="hero">
         <div className="wrap">
-          <span className="kicker">AlphaZero-style chess engine</span>
           <h1>
-            chess-nn — an AlphaZero-style chess engine, built from <span className="accent">scratch</span>.
+            A chess engine, trained on an{" "}
+            <span className="accent">8GB MacBook Air</span>.
           </h1>
           <p className="lead">
-            A self-trained convolutional policy/value network driven by Monte-Carlo Tree Search,
-            written from scratch in PyTorch. Play Stockfish at a selectable Elo in the browser; on
-            every move the network's top picks (raw policy, no search) are shown next to
-            Stockfish's analysis. Training has been bounded by available compute (limited GPU time
-            and dataset size on rented hardware), so the current network is still a modest player.
+            A convolutional policy/value network driven by Monte-Carlo Tree Search, written in
+            PyTorch. Play Stockfish at a selectable Elo in the browser; on every move the
+            network's top picks (raw policy, no search) are shown next to Stockfish's analysis.
           </p>
 
           <div className="hero-stats">
@@ -63,7 +57,7 @@ export default function App() {
 
           <div className="hero-cta">
             <a className="btn primary" href="#play">
-              Play &amp; compare ↓
+              Play and compare
             </a>
             <a className="btn ghost" href="#architecture">
               How it works
@@ -76,8 +70,10 @@ export default function App() {
       <section id="play" className="section">
         <div className="wrap">
           <div className="section-head">
-            <span className="kicker">Play &amp; compare</span>
-            <h2 className="section-title">Play &amp; compare</h2>
+            <span className="kicker">
+              <span className="sec-idx">01</span>Demonstration
+            </span>
+            <h2 className="section-title">Play and compare</h2>
             <p className="section-sub">
               Drag a piece to move. Stockfish replies at the chosen Elo. After every move, the
               network's top pick (green) and Stockfish's best move (blue) are drawn on the board,
@@ -89,15 +85,13 @@ export default function App() {
       </section>
 
       <Architecture />
-      <Journey />
       <Improvements />
       <Strength />
-      <Roadmap />
 
       <footer className="footer">
         <div className="wrap footer-inner">
           <div className="muted">
-            chess-nn — an AlphaZero-style chess engine in PyTorch.
+            chess-nn, a chess engine in PyTorch.
           </div>
           <div className="mono">
             net = raw policy · Stockfish 16 NNUE · runs client-side

@@ -13,15 +13,15 @@ import ComparisonPanel from "./ComparisonPanel";
 import EvalBar from "./EvalBar";
 
 const START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
-const ELO_PRESETS = [1350, 1500, 1800, 2200, 2800];
+const ELO_PRESETS = [400, 800, 1200, 1600, 2000];
 // Single-threaded WASM SF reaches its depth at very different speeds across
-// positions, so the analyst is bounded by movetime — keeps the panel snappy
+// positions, so the analyst is bounded by movetime - keeps the panel snappy
 // and stops autoplay from stalling when SF chains into a complex middlegame.
 // 1500ms reaches roughly depth 12-15 on opening positions with MultiPV=3.
 const ANALYSIS_MOVETIME_MS = 1500;
 const AUTOPLAY_DELAY_MS = 1800;
-const NET_ACCENT = "#7ecfa0"; // var(--accent)
-const SF_ACCENT = "#6aa0ff"; // var(--accent-2)
+const NET_ACCENT = "#276b47"; // var(--net)
+const SF_ACCENT = "#2b4bbf"; // var(--sf)
 
 type Color = "white" | "black";
 
@@ -59,7 +59,7 @@ export default function EngineBoard() {
   const [moves, setMoves] = useState<string[]>([]);
   const [humanColor, setHumanColor] = useState<Color>("white");
   const [orientation, setOrientation] = useState<Color>("white");
-  const [elo, setElo] = useState<number>(1500);
+  const [elo, setElo] = useState<number>(400);
   const [showHints, setShowHints] = useState(true);
 
   const [fenInput, setFenInput] = useState(START_FEN);
@@ -173,7 +173,7 @@ export default function EngineBoard() {
   // look up the net's top move in Stockfish's MultiPV alternatives. If it's in
   // the top-N lines we get a real cp loss; if not, the net's pick is "outside
   // Stockfish's top N" and we render that instead of a number. All synchronous
-  // — no second SF call (the `searchmoves` variant hangs in this WASM build).
+  // - no second SF call (the `searchmoves` variant hangs in this WASM build).
   useEffect(() => {
     if (!sf || !netResult || netResult.topMoves.length === 0 || isGameOver) {
       setDeviation(null);
@@ -398,26 +398,26 @@ export default function EngineBoard() {
   let status = "";
   let gameOverFlag = false;
   if (game.isCheckmate()) {
-    status = `Checkmate — ${whiteToMove ? "Black" : "White"} wins`;
+    status = `Checkmate. ${whiteToMove ? "Black" : "White"} wins`;
     gameOverFlag = true;
   } else if (game.isStalemate()) {
-    status = "Stalemate — draw";
+    status = "Stalemate. Draw";
     gameOverFlag = true;
   } else if (game.isInsufficientMaterial()) {
-    status = "Draw — insufficient material";
+    status = "Draw: insufficient material";
     gameOverFlag = true;
   } else if (game.isThreefoldRepetition()) {
-    status = "Draw — threefold repetition";
+    status = "Draw: threefold repetition";
     gameOverFlag = true;
   } else if (game.isDraw()) {
-    status = "Draw — 50-move rule";
+    status = "Draw: 50-move rule";
     gameOverFlag = true;
   } else if (opponentThinking) {
     status = "Stockfish is thinking…";
   } else if (engineBooting && !sf) {
     status = "Booting engine…";
   } else {
-    status = `${whiteToMove ? "White" : "Black"} to move${game.inCheck() ? " — check" : ""}`;
+    status = `${whiteToMove ? "White" : "Black"} to move${game.inCheck() ? " · check" : ""}`;
   }
 
   const whiteCp = sf ? toWhiteCp(sf.scoreCp, whiteToMove) : null;
@@ -432,9 +432,9 @@ export default function EngineBoard() {
     arrows,
     allowDragging: humanTurn && !opponentThinking && !autoplay,
     id: "engine-board",
-    darkSquareStyle: { backgroundColor: "#2a2a3c" },
-    lightSquareStyle: { backgroundColor: "#3d3d52" },
-    boardStyle: { borderRadius: "8px" },
+    darkSquareStyle: { backgroundColor: "#b58863" },
+    lightSquareStyle: { backgroundColor: "#f0d9b5" },
+    boardStyle: { borderRadius: "0" },
     animationDurationInMs: 180,
   };
 
@@ -449,7 +449,7 @@ export default function EngineBoard() {
           <div className={`board-status${gameOverFlag ? " gameover" : ""}`}>
             <span
               className="turn-dot"
-              style={{ background: whiteToMove ? "#e9ecf5" : "#0a0a0f" }}
+              style={{ background: whiteToMove ? "#fffdf7" : "#1c1a15" }}
             />
             {opponentThinking || (engineBooting && !sf) ? <span className="spin" /> : null}
             {status}
@@ -482,7 +482,7 @@ export default function EngineBoard() {
             )}
 
             <div>
-              <span className="field-label">opponent strength — Stockfish</span>
+              <span className="field-label">opponent strength · Stockfish</span>
               <div className="controls-row">
                 <div className="elo-presets">
                   {ELO_PRESETS.map((p) => (
@@ -500,8 +500,8 @@ export default function EngineBoard() {
                 <input
                   className="range"
                   type="range"
-                  min={800}
-                  max={3000}
+                  min={400}
+                  max={2000}
                   step={50}
                   value={elo}
                   onChange={(e) => setElo(Number(e.target.value))}

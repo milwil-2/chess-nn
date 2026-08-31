@@ -1,5 +1,5 @@
-// Improvements — grouped cards covering data/supervision, architecture,
-// search/MCTS, and inference-time helpers.
+// Improvements: rule-separated groups covering data/supervision,
+// architecture, search/MCTS, and inference-time helpers.
 import type { ReactNode } from "react";
 
 interface Item {
@@ -100,8 +100,10 @@ export default function Improvements() {
     <section id="improvements" className="section">
       <div className="wrap">
         <div className="section-head">
-          <span className="kicker">Improvements</span>
-          <h2 className="section-title">Improvements</h2>
+          <span className="kicker">
+            <span className="sec-idx">03</span>Improvements
+          </span>
+          <h2 className="section-title">What was changed, and why</h2>
           <p className="section-sub">
             The hand-coded inference helpers (opening book, Syzygy tablebases, transposition cache,
             blunder filter) are used only at play time and never during self-play, so the learned
@@ -116,12 +118,14 @@ export default function Improvements() {
                 <span className="idx">{g.idx}</span>
                 {g.title}
               </h4>
-              {g.items.map((it, i) => (
-                <div className="imp-item" key={i}>
-                  <div className="name">{it.name}</div>
-                  <div className="why">{it.why}</div>
-                </div>
-              ))}
+              <div className="imp-items">
+                {g.items.map((it, i) => (
+                  <div className="imp-item" key={i}>
+                    <div className="name">{it.name}</div>
+                    <div className="why">{it.why}</div>
+                  </div>
+                ))}
+              </div>
             </div>
           ))}
         </div>
