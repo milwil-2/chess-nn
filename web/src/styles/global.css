@@ -282,6 +282,24 @@ code {
   background: var(--ink);
   color: var(--paper);
 }
+.btn.autoplay-btn {
+  width: 100%;
+  border-color: var(--net);
+  color: var(--net);
+  font-weight: 600;
+}
+.btn.autoplay-btn:hover {
+  background: var(--net);
+  color: var(--paper);
+}
+.btn.autoplay-btn.active {
+  background: var(--net);
+  color: var(--paper);
+}
+.btn.autoplay-btn.active:hover {
+  background: var(--loss);
+  border-color: var(--loss);
+}
 .btn.primary:hover {
   background: var(--net);
   border-color: var(--net);

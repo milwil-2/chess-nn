@@ -456,6 +456,13 @@ export default function EngineBoard() {
           </div>
 
           <div className="controls">
+            <button
+              className={`btn autoplay-btn${autoplay ? " active" : ""}`}
+              onClick={() => setAutoplay(!autoplay)}
+            >
+              {autoplay ? "Stop autoplay" : "Autoplay · let chess-nn play"}
+            </button>
+
             <div className="controls-row">
               <div className="grow">
                 <label className="field-label" htmlFor="fen">
@@ -538,14 +545,6 @@ export default function EngineBoard() {
                   onChange={(e) => setShowHints(e.target.checked)}
                 />
                 show hint arrows
-              </label>
-              <label className="toggle">
-                <input
-                  type="checkbox"
-                  checked={autoplay}
-                  onChange={(e) => setAutoplay(e.target.checked)}
-                />
-                autoplay (chess-nn plays)
               </label>
             </div>
 
